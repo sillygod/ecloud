@@ -63,6 +63,32 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 | `c` | 複製 gs:// URL |
 | `q` | 關閉視窗 |
 
+> [!NOTE]
+> 如果您使用 **Evil mode**，上述按鍵在 `normal` state 下也支援。
+
+## Artifact Registry (GAR)
+
+使用 `M-x ecloud-gar-browse` 開啟 GAR 瀏覽器。預設會詢問 Location (e.g., `asia-east1`)。
+
+瀏覽器支援三層結構：
+1. **Repository List**
+2. **Package (Image) List**
+3. **Tag (Version) List**
+
+### 快捷鍵
+
+| 按鍵 | 功能 |
+|------|------|
+| `RET` | 進入 Repo/Package |
+| `^` | 返回上一層 |
+| `g` | 重新整理 |
+| `P` | Pull Image (需安裝 docker) |
+| `D` | 刪除 Repo/Image/Tag (需確認) |
+| `q` | 關閉視窗 |
+
+> [!WARNING]
+> 刪除操作會要求輸入 "delete" 以確認，請謹慎操作。
+
 ## 其他指令
 
 - `M-x ecloud-download-file` - 下載檔案（有補全）
@@ -111,3 +137,7 @@ curl -X POST http://localhost:8765/jsonrpc \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"list_buckets","params":{}}'
 ```
+
+## License
+
+MIT License

@@ -9,6 +9,7 @@ from typing import Any, Callable
 from pydantic import BaseModel
 
 from gcs_client import get_gcs_client, GCSClient
+from gar_client import get_gar_client, GARClient
 
 
 # JSON-RPC 2.0 Error Codes
@@ -20,6 +21,7 @@ INTERNAL_ERROR = -32603
 # Custom error codes
 GCS_ERROR = -32001
 NOT_FOUND = -32002
+GAR_ERROR = -32003
 
 
 class JsonRpcRequest(BaseModel):
@@ -55,6 +57,7 @@ class JsonRpcHandler:
     def _register_methods(self):
         """Register all available JSON-RPC methods."""
         self._methods = {
+            # GCS methods
             "list_buckets": self._list_buckets,
             "list_objects": self._list_objects,
             "get_object_info": self._get_object_info,
@@ -62,6 +65,18 @@ class JsonRpcHandler:
             "upload_object": self._upload_object,
             "delete_object": self._delete_object,
             "create_folder": self._create_folder,
+            # GAR methods
+            "gar_list_repos": self._gar_list_repos,
+            "gar_list_locations": self._gar_list_locations,
+            "gar_create_tag": self._gar_create_tag,
+            "gar_list_packages": self._gar_list_packages,
+            "gar_list_tags": self._gar_list_tags,
+            "gar_delete_package": self._gar_delete_package,
+            "gar_delete_tag": self._gar_delete_tag,
+            "gar_pull": self._gar_pull,
+            "gar_push": self._gar_push,
+            "gar_tag": self._gar_tag,
+            # System
             "ping": self._ping,
         }
     
@@ -108,10 +123,14 @@ class JsonRpcHandler:
                 ),
             )
         except Exception as e:
+            error_code = GCS_ERROR
+            if "ArtifactRegistry" in type(e).__name__ or "Docker" in str(e):
+                error_code = GAR_ERROR
+                
             return JsonRpcResponse(
                 id=request.id,
                 error=JsonRpcError(
-                    code=GCS_ERROR,
+                    code=error_code,
                     message=str(e),
                     data={"type": type(e).__name__},
                 ),
@@ -120,8 +139,12 @@ class JsonRpcHandler:
     def _get_client(self) -> GCSClient:
         """Get the GCS client instance."""
         return get_gcs_client()
+
+    def _get_gar_client(self) -> GARClient:
+        """Get the GAR client instance."""
+        return get_gar_client()
     
-    # --- Method implementations ---
+    # --- GCS Method implementations ---
     
     def _ping(self, params: dict) -> dict:
         """Health check method."""
@@ -217,6 +240,82 @@ class JsonRpcHandler:
         
         client = self._get_client()
         return client.create_folder(bucket, folder_path)
+
+    # --- GAR Method implementations ---
+
+    def _gar_list_repos(self, params: dict) -> dict:
+        location = params.get("location")
+        if not location:
+            raise TypeError("Missing parameter: location")
+        
+        client = self._get_gar_client()
+        repos = client.list_repositories(location)
+        return {"repositories": [r.to_dict() for r in repos]}
+
+    def _gar_list_locations(self, params: dict) -> dict:
+        client = self._get_gar_client()
+        locations = client.list_locations()
+        return {"locations": locations}
+
+    def _gar_create_tag(self, params: dict) -> dict:
+        package = params.get("package")
+        tag_id = params.get("tag_id")
+        version = params.get("version") # Expect full version resource name
+        
+        if not all([package, tag_id, version]):
+            raise ValueError("package, tag_id, and version are required")
+            
+        client = self._get_gar_client()
+        return client.create_tag(package, tag_id, version)
+
+    def _gar_list_packages(self, params: dict) -> dict:
+        repo = params.get("repo") # Full resource name
+        if not repo:
+            raise TypeError("Missing parameter: repo")
+            
+        client = self._get_gar_client()
+        images = client.list_packages(repo)
+        return {"packages": [i.to_dict() for i in images]}
+
+    def _gar_list_tags(self, params: dict) -> dict:
+        package = params.get("package") # Full resource name
+        if not package:
+            raise TypeError("Missing parameter: package")
+            
+        client = self._get_gar_client()
+        tags = client.list_tags(package)
+        return {"tags": [t.to_dict() for t in tags]}
+
+    def _gar_delete_package(self, params: dict) -> dict:
+        package = params.get("package")
+        if not package:
+            raise TypeError("Missing parameter: package")
+        return self._get_gar_client().delete_package(package)
+
+    def _gar_delete_tag(self, params: dict) -> dict:
+        name = params.get("name") # Full tag resource name
+        if not name:
+            raise TypeError("Missing parameter: name")
+        return self._get_gar_client().delete_tag(name)
+
+    def _gar_pull(self, params: dict) -> dict:
+        uri = params.get("uri")
+        if not uri:
+            raise TypeError("Missing parameter: uri")
+        return self._get_gar_client().docker_pull(uri)
+
+    def _gar_push(self, params: dict) -> dict:
+        uri = params.get("uri")
+        if not uri:
+            raise TypeError("Missing parameter: uri")
+        return self._get_gar_client().docker_push(uri)
+
+    def _gar_tag(self, params: dict) -> dict:
+        source = params.get("source")
+        target = params.get("target")
+        if not source or not target:
+            raise TypeError("Missing parameters: source, target")
+        return self._get_gar_client().docker_tag(source, target)
 
 
 # Singleton handler instance

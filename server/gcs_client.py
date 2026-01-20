@@ -95,7 +95,9 @@ class GCSClient:
                 storage_class=bucket.storage_class or "STANDARD",
                 created=bucket.time_created.isoformat() if bucket.time_created else "",
             ))
-        return buckets
+        
+        # Sort buckets by name
+        return sorted(buckets, key=lambda b: b.name)
     
     def list_objects(
         self,
@@ -131,6 +133,10 @@ class GCSClient:
         
         # Get virtual folders (prefixes)
         prefixes = list(blobs.prefixes) if hasattr(blobs, 'prefixes') else []
+        
+        # Sort objects and prefixes
+        objects.sort(key=lambda o: o.name)
+        prefixes.sort()
         
         return objects, prefixes
     

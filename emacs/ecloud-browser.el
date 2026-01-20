@@ -79,26 +79,37 @@
 
 ;;; Mode definition
 
-(defvar ecloud-browser-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'ecloud-browser-enter)
-    (define-key map (kbd "^") #'ecloud-browser-up)
-    (define-key map (kbd "g") #'ecloud-browser-refresh)
-    (define-key map (kbd "d") #'ecloud-browser-download)
-    (define-key map (kbd "u") #'ecloud-browser-upload)
-    (define-key map (kbd "D") #'ecloud-browser-delete)
-    (define-key map (kbd "+") #'ecloud-browser-create-folder)
-    (define-key map (kbd "c") #'ecloud-browser-copy-path)
-    (define-key map (kbd "q") #'quit-window)
-    map)
+
+(defun ecloud-browser-help ()
+  "Show help for ecloud-browser-mode."
+  (interactive)
+  (message "GCS Keys: [RET]Enter [^]Up [g]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [?]Help [q]Quit"))
+
+(defvar ecloud-browser-mode-map nil
   "Keymap for `ecloud-browser-mode'.")
+
+(unless ecloud-browser-mode-map
+  (setq ecloud-browser-mode-map (make-sparse-keymap))
+  (define-key ecloud-browser-mode-map (kbd "RET") #'ecloud-browser-enter)
+  (define-key ecloud-browser-mode-map (kbd "^") #'ecloud-browser-up)
+  (define-key ecloud-browser-mode-map (kbd "g") #'ecloud-browser-refresh)
+  (define-key ecloud-browser-mode-map (kbd "d") #'ecloud-browser-download)
+  (define-key ecloud-browser-mode-map (kbd "u") #'ecloud-browser-upload)
+  (define-key ecloud-browser-mode-map (kbd "D") #'ecloud-browser-delete)
+  (define-key ecloud-browser-mode-map (kbd "+") #'ecloud-browser-create-folder)
+  (define-key ecloud-browser-mode-map (kbd "c") #'ecloud-browser-copy-path)
+  (define-key ecloud-browser-mode-map (kbd "?") #'ecloud-browser-help)
+  (define-key ecloud-browser-mode-map (kbd "q") #'quit-window))
 
 (define-derived-mode ecloud-browser-mode tabulated-list-mode "ECloud"
   "Major mode for browsing GCS buckets.
 
 \\{ecloud-browser-mode-map}"
   (setq tabulated-list-padding 2)
-  (add-hook 'tabulated-list-revert-hook #'ecloud-browser--refresh-data nil t))
+  (add-hook 'tabulated-list-revert-hook #'ecloud-browser--refresh-data nil t)
+  ;; Force Evil Motion state if available
+  (when (fboundp 'evil-motion-state)
+    (evil-motion-state)))
 
 ;;; Data fetching
 
@@ -127,7 +138,7 @@
          (objects (plist-get response :objects))
          (prefixes (plist-get response :prefixes))
          (entries '()))
-    
+
     ;; Add folders first
     (dolist (prefix prefixes)
       (let ((name (ecloud-browser--extract-name prefix ecloud-browser--current-prefix)))
@@ -138,7 +149,7 @@
                      "folder"
                      ""))
               entries)))
-    
+
     ;; Add files
     (dolist (obj objects)
       (let ((full-name (plist-get obj :name))
@@ -155,41 +166,36 @@
                          "file"
                          (ecloud-browser--format-date updated)))
                   entries)))))
-    
+
     (nreverse entries)))
 
 (defun ecloud-browser--refresh-data ()
-  "Refresh data for the current view."
-  (if ecloud-browser--current-bucket
+  "Refresh the tabulated list data."
+  (if (not ecloud-browser--current-bucket)
+      ;; List buckets
       (progn
-        (setq tabulated-list-format
-              [("Name" 40 t)
-               ("Size" 12 t)
-               ("Type" 8 t)
-               ("Modified" 20 t)])
-        (setq tabulated-list-entries #'ecloud-browser--fetch-objects))
-    (setq tabulated-list-format
-          [("Bucket" 40 t)
-           ("Location" 15 t)
-           ("Class" 15 t)
-           ("" 0 nil)])
-    (setq tabulated-list-entries #'ecloud-browser--fetch-buckets))
-  (tabulated-list-init-header))
+        (setq tabulated-list-format [("Bucket Name" 50 t) ("Location" 15 t) ("Storage Class" 15 t) ("Created" 20 nil)])
+        (setq tabulated-list-entries #'ecloud-browser--fetch-buckets))
+    ;; List objects
+    (progn
+      (setq tabulated-list-format [("Name" 60 t) ("Size" 10 nil) ("Type" 10 nil) ("Updated" 20 nil)])
+      (setq tabulated-list-entries #'ecloud-browser--fetch-objects)))
 
-(defun ecloud-browser--update-header ()
-  "Update the header line to show current location."
-  (setq header-line-format
+  (setq mode-name
         (if ecloud-browser--current-bucket
-            (format " 📦 %s/%s"
-                    ecloud-browser--current-bucket
-                    ecloud-browser--current-prefix)
-          " 📦 GCS Buckets")))
+            (format "ECloud %s/%s" ecloud-browser--current-bucket ecloud-browser--current-prefix)
+          "ECloud Buckets"))
+  (force-mode-line-update)
+
+  (tabulated-list-init-header) ;; Ensure headers are initialized
+  (tabulated-list-print t))
 
 ;;; Interactive commands
 
 (defun ecloud-browser-enter ()
   "Enter the item at point (bucket or folder)."
   (interactive)
+  (message "!!!!!")
   (let* ((entry (tabulated-list-get-entry))
          (id (tabulated-list-get-id)))
     (when entry
@@ -231,9 +237,7 @@
 (defun ecloud-browser-refresh ()
   "Refresh the current view."
   (interactive)
-  (ecloud-browser--refresh-data)
-  (ecloud-browser--update-header)
-  (tabulated-list-print t))
+  (ecloud-browser--refresh-data))
 
 (defun ecloud-browser-download ()
   "Download the file at point."
@@ -339,6 +343,22 @@
       (setq ecloud-browser--navigation-stack nil)
       (ecloud-browser-refresh))
     (switch-to-buffer buffer)))
+
+;;; Evil mode support
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-browser-mode 'motion)
+  (evil-define-key 'motion ecloud-browser-mode-map
+    (kbd "RET") #'ecloud-browser-enter
+    (kbd "^")   #'ecloud-browser-up
+    (kbd "g")   #'ecloud-browser-refresh
+    (kbd "d")   #'ecloud-browser-download
+    (kbd "u")   #'ecloud-browser-upload
+    (kbd "D")   #'ecloud-browser-delete
+    (kbd "+")   #'ecloud-browser-create-folder
+    (kbd "c")   #'ecloud-browser-copy-path
+    (kbd "?")   #'ecloud-browser-help
+    (kbd "q")   #'quit-window))
 
 (provide 'ecloud-browser)
 ;;; ecloud-browser.el ends here

@@ -49,6 +49,7 @@
 (require 'ecloud-rpc)
 (require 'ecloud-browser)
 (require 'ecloud-commands)
+(require 'ecloud-gar)
 
 ;;; User customization
 
@@ -62,6 +63,10 @@
 ;;;###autoload
 (autoload 'ecloud-browse "ecloud-browser"
   "Open the ECloud browser." t)
+
+;;;###autoload
+(autoload 'ecloud-gar-browse "ecloud-gar"
+  "Open the ECloud Artifact Registry browser." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

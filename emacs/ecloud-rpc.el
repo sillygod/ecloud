@@ -58,6 +58,7 @@ Returns the result on success, signals an error on failure."
   (let* ((json-object-type 'plist)
          (json-array-type 'list)
          (json-key-type 'keyword)
+         (json-false nil)
          (response (json-read-from-string response-string))
          (error-obj (plist-get response :error))
          (result (plist-get response :result)))
@@ -174,6 +175,52 @@ ERROR-CALLBACK is called with error message on failure."
   (ecloud-rpc-request "create_folder"
                       (list :bucket bucket
                             :folder_path folder-path)))
+
+;;; GAR Operations
+
+(defun ecloud-rpc-gar-list-locations ()
+  "List available GAR locations."
+  (ecloud-rpc-request "gar_list_locations" nil))
+
+(defun ecloud-rpc-gar-list-repos (location)
+  "List repositories in LOCATION."
+  (ecloud-rpc-request "gar_list_repos" (list :location location)))
+
+(defun ecloud-rpc-gar-list-packages (repo)
+  "List packages in REPO."
+  (ecloud-rpc-request "gar_list_packages" (list :repo repo)))
+
+(defun ecloud-rpc-gar-list-tags (package)
+  "List tags for PACKAGE."
+  (ecloud-rpc-request "gar_list_tags" (list :package package)))
+
+(defun ecloud-rpc-gar-delete-package (package)
+  "Delete PACKAGE and all its tags."
+  (ecloud-rpc-request "gar_delete_package" (list :package package)))
+
+(defun ecloud-rpc-gar-delete-tag (name)
+  "Delete tag NAME."
+  (ecloud-rpc-request "gar_delete_tag" (list :name name)))
+
+(defun ecloud-rpc-gar-pull (uri)
+  "Pull docker image URI."
+  (ecloud-rpc-request "gar_pull" (list :uri uri)))
+
+(defun ecloud-rpc-gar-push (uri)
+  "Push docker image URI."
+  (ecloud-rpc-request "gar_push" (list :uri uri)))
+
+(defun ecloud-rpc-gar-tag (source target)
+  "Tag docker image SOURCE as TARGET."
+  (ecloud-rpc-request "gar_tag" (list :source source :target target)))
+
+(defun ecloud-rpc-gar-create-tag (package tag-id version)
+  "Create a new tag for VERSION in PACKAGE."
+  (ecloud-rpc-request "gar_create_tag"
+                      (list :package package
+                            :tag_id tag-id
+                            :version version)))
+
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here
