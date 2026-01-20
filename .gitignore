@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+.hypothesis/
+
+# Emacs
+*~
+\#*\#
+.#*
+*.elc
+auto-save-list
+.dir-locals.el
+.org-id-locations
+*_archive
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDES
+.idea/
+.vscode/
+
+# Project Specific
+server/.venv/
+server/dist/
+server/build/
+server/*.egg-info/
+*.json
+!package.json
+!tsconfig.json
+!pyproject.toml
+
+# Safe keep service account keys ignored just in case
+service-account.json
+creds.json
+key.json
