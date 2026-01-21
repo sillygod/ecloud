@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from gcs_client import get_gcs_client, GCSClient
 from gar_client import get_gar_client, GARClient
 from compute_client import get_compute_client, ComputeClient
+from config import config
 
 
 # JSON-RPC 2.0 Error Codes
@@ -82,8 +83,10 @@ class JsonRpcHandler:
             "compute_list_addresses": self._compute_list_addresses,
             "compute_reserve_address": self._compute_reserve_address,
             "compute_list_regions": self._compute_list_regions,
+            "compute_list_instances": self._compute_list_instances,
             # System
             "ping": self._ping,
+            "get_config": self._get_config,
         }
     
     def handle(self, request: JsonRpcRequest) -> JsonRpcResponse:
@@ -354,6 +357,22 @@ class JsonRpcHandler:
         client = self._get_compute_client()
         regions = client.list_regions()
         return {"regions": regions}
+
+    def _compute_list_instances(self, params: dict) -> dict:
+        """List all VM instances."""
+        client = self._get_compute_client()
+        instances = client.list_instances()
+        return {
+            "instances": [i.to_dict() for i in instances],
+            "count": len(instances),
+        }
+    
+    def _get_config(self, params: dict) -> dict:
+        """Get public server configuration."""
+        return {
+            "gcs_project": config.gcs_project,
+            "impersonate_service_account": config.impersonate_service_account,
+        }
 
 
 # Singleton handler instance

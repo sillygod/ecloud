@@ -18,6 +18,27 @@ os.environ["GRPC_DNS_RESOLVER"] = "native"
 
 
 @dataclass
+class InstanceInfo:
+    """Information about a VM instance."""
+    name: str
+    zone: str
+    status: str
+    internal_ip: str
+    external_ip: str
+    machine_type: str
+    
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "zone": self.zone,
+            "status": self.status,
+            "internal_ip": self.internal_ip,
+            "external_ip": self.external_ip,
+            "machine_type": self.machine_type,
+        }
+
+
+@dataclass
 class AddressInfo:
     """Information about an IP address."""
     name: str
@@ -178,6 +199,47 @@ class ComputeClient:
         addresses.sort(key=lambda a: (0 if a.address_type == "EXTERNAL" else 1, a.region, a.name))
         return addresses
     
+    def list_instances(self) -> List[InstanceInfo]:
+        """List all VM instances across all zones."""
+        instances = []
+        
+        try:
+            request = compute_v1.AggregatedListInstancesRequest(project=self._project)
+            agg_list = self._instances_client.aggregated_list(request=request)
+            
+            for zone_key, response in agg_list:
+                if response.instances:
+                    # zone_key format: "zones/us-central1-a"
+                    zone_name = zone_key.replace("zones/", "") if zone_key.startswith("zones/") else zone_key
+                    
+                    for instance in response.instances:
+                        internal_ip = ""
+                        external_ip = ""
+                        
+                        # Get IPs from first network interface
+                        if instance.network_interfaces:
+                            nic = instance.network_interfaces[0]
+                            internal_ip = nic.network_i_p or ""
+                            if nic.access_configs:
+                                external_ip = nic.access_configs[0].nat_i_p or ""
+                        
+                        machine_type = instance.machine_type.split("/")[-1] if instance.machine_type else ""
+                        
+                        instances.append(InstanceInfo(
+                            name=instance.name,
+                            zone=zone_name,
+                            status=instance.status,
+                            internal_ip=internal_ip,
+                            external_ip=external_ip,
+                            machine_type=machine_type,
+                        ))
+        except Exception as e:
+            print(f"Error listing instances: {e}")
+            
+        # Sort by name
+        instances.sort(key=lambda i: i.name)
+        return instances
+
     def reserve_address(self, region: str, name: str) -> dict:
         """Reserve a new external static IP address.
         

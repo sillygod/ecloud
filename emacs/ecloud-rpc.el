@@ -236,6 +236,17 @@ ERROR-CALLBACK is called with error message on failure."
   "List available regions for IP address reservation."
   (ecloud-rpc-request "compute_list_regions" nil))
 
+(defun ecloud-rpc-compute-list-instances ()
+  "List all VM instances."
+  (ecloud-rpc-request "compute_list_instances" nil))
+
+;;; System
+
+(defun ecloud-rpc-get-config ()
+  "Get server configuration."
+  (ecloud-rpc-request "get_config" nil))
+
+
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here
