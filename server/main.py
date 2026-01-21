@@ -5,6 +5,8 @@ Provides a JSON-RPC endpoint for GCloud Storage operations.
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 import json
 
@@ -17,6 +19,7 @@ from jsonrpc_handler import (
     PARSE_ERROR,
     INVALID_REQUEST,
 )
+from websocket_manager import get_manager
 
 
 app = FastAPI(
@@ -84,6 +87,18 @@ async def jsonrpc_endpoint(request: Request) -> Response:
         content=response.model_dump_json(),
         media_type="application/json",
     )
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    manager = get_manager()
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive and handle any incoming control messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 
 @app.on_event("shutdown")

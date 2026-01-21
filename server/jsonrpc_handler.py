@@ -8,13 +8,16 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from pydantic import BaseModel
 import asyncio
+import os
 
 from gcs_client import get_gcs_client, GCSClient
 from gar_client import get_gar_client, GARClient
 from compute_client import get_compute_client, ComputeClient
 from sql_client import get_sql_client, SQLClient
 from sql_proxy import get_proxy_manager, SQLProxyManager
+from sql_proxy import get_proxy_manager, SQLProxyManager
 from config import config
+from websocket_manager import get_manager
 
 
 # JSON-RPC 2.0 Error Codes
@@ -90,7 +93,11 @@ class JsonRpcHandler:
             # SQL methods
             "sql_list_instances": self._sql_list_instances,
             "sql_list_databases": self._sql_list_databases,
+            "sql_create_database": self._sql_create_database,
+            "sql_delete_database": self._sql_delete_database,
             "sql_list_users": self._sql_list_users,
+            "sql_create_user": self._sql_create_user,
+            "sql_delete_user": self._sql_delete_user,
             "sql_start_proxy": self._sql_start_proxy,
             "sql_stop_proxy": self._sql_stop_proxy,
             "sql_list_proxies": self._sql_list_proxies,
@@ -229,32 +236,64 @@ class JsonRpcHandler:
         
         return info.to_dict()
     
-    def _download_object(self, params: dict) -> dict:
+    async def _download_object(self, params: dict) -> dict:
         """Download an object to local filesystem."""
         bucket = params.get("bucket")
         object_path = params.get("object_path")
         local_path = params.get("local_path")
+        if local_path:
+            local_path = os.path.expanduser(local_path)
         
         if not all([bucket, object_path, local_path]):
             raise TypeError("Missing required parameters: bucket, object_path, local_path")
         
+        # Broadcast start
+        await get_manager().broadcast({
+            "type": "gcs_download_started",
+            "data": {"bucket": bucket, "object_path": object_path}
+        })
+
         client = self._get_client()
-        return client.download_object(bucket, object_path, local_path)
+        result = await asyncio.to_thread(client.download_object, bucket, object_path, local_path)
+
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gcs_download_finished",
+            "data": {"bucket": bucket, "object_path": object_path, "local_path": local_path}
+        })
+        
+        return result
     
-    def _upload_object(self, params: dict) -> dict:
+    async def _upload_object(self, params: dict) -> dict:
         """Upload a local file to GCS."""
         bucket = params.get("bucket")
         object_path = params.get("object_path")
         local_path = params.get("local_path")
+        if local_path:
+            local_path = os.path.expanduser(local_path)
         content_type = params.get("content_type")
         
         if not all([bucket, object_path, local_path]):
             raise TypeError("Missing required parameters: bucket, object_path, local_path")
         
+        # Broadcast start
+        await get_manager().broadcast({
+            "type": "gcs_upload_started",
+            "data": {"bucket": bucket, "object_path": object_path}
+        })
+        
         client = self._get_client()
-        return client.upload_object(bucket, object_path, local_path, content_type)
+        result = await asyncio.to_thread(client.upload_object, bucket, object_path, local_path, content_type)
+
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gcs_upload_finished",
+            "data": {"bucket": bucket, "object_path": object_path}
+        })
+        
+        return result
     
-    def _delete_object(self, params: dict) -> dict:
+    async def _delete_object(self, params: dict) -> dict:
         """Delete an object."""
         bucket = params.get("bucket")
         object_path = params.get("object_path")
@@ -263,7 +302,15 @@ class JsonRpcHandler:
             raise TypeError("Missing required parameters: bucket, object_path")
         
         client = self._get_client()
-        return client.delete_object(bucket, object_path)
+        result = await asyncio.to_thread(client.delete_object, bucket, object_path)
+        
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gcs_delete_finished",
+            "data": {"bucket": bucket, "object_path": object_path}
+        })
+        
+        return result
     
     def _create_folder(self, params: dict) -> dict:
         """Create a virtual folder."""
@@ -321,29 +368,81 @@ class JsonRpcHandler:
         tags = client.list_tags(package)
         return {"tags": [t.to_dict() for t in tags]}
 
-    def _gar_delete_package(self, params: dict) -> dict:
+    async def _gar_delete_package(self, params: dict) -> dict:
         package = params.get("package")
         if not package:
             raise TypeError("Missing parameter: package")
-        return self._get_gar_client().delete_package(package)
+        
+        client = self._get_gar_client()
+        result = await asyncio.to_thread(client.delete_package, package)
+        
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gar_package_deleted",
+            "data": {"package": package}
+        })
+        
+        return result
 
-    def _gar_delete_tag(self, params: dict) -> dict:
+    async def _gar_delete_tag(self, params: dict) -> dict:
         name = params.get("name") # Full tag resource name
         if not name:
             raise TypeError("Missing parameter: name")
-        return self._get_gar_client().delete_tag(name)
+            
+        client = self._get_gar_client()
+        result = await asyncio.to_thread(client.delete_tag, name)
+        
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gar_tag_deleted",
+            "data": {"name": name}
+        })
+        
+        return result
 
-    def _gar_pull(self, params: dict) -> dict:
+    async def _gar_pull(self, params: dict) -> dict:
         uri = params.get("uri")
         if not uri:
             raise TypeError("Missing parameter: uri")
-        return self._get_gar_client().docker_pull(uri)
+        
+        # Broadcast start
+        await get_manager().broadcast({
+            "type": "gar_pull_started",
+            "data": {"uri": uri}
+        })
 
-    def _gar_push(self, params: dict) -> dict:
+        client = self._get_gar_client()
+        result = await asyncio.to_thread(client.docker_pull, uri)
+        
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gar_pull_finished",
+            "data": {"uri": uri}
+        })
+        
+        return result
+
+    async def _gar_push(self, params: dict) -> dict:
         uri = params.get("uri")
         if not uri:
             raise TypeError("Missing parameter: uri")
-        return self._get_gar_client().docker_push(uri)
+            
+        # Broadcast start
+        await get_manager().broadcast({
+            "type": "gar_push_started",
+            "data": {"uri": uri}
+        })
+
+        client = self._get_gar_client()
+        result = await asyncio.to_thread(client.docker_push, uri)
+        
+        # Broadcast finish
+        await get_manager().broadcast({
+            "type": "gar_push_finished",
+            "data": {"uri": uri}
+        })
+        
+        return result
 
     def _gar_tag(self, params: dict) -> dict:
         source = params.get("source")
@@ -411,13 +510,62 @@ class JsonRpcHandler:
         databases = client.list_databases(instance)
         return {"databases": databases}
 
-    def _sql_list_users(self, params: dict) -> dict:
+    async def _sql_list_users(self, params: dict) -> dict:
         instance = params.get("instance")
         if not instance:
-            raise TypeError("Missing parameter: instance")
+            raise ValueError("Instance name is required")
         client = self._get_sql_client()
-        users = client.list_users(instance)
+        users = await asyncio.to_thread(client.list_users, instance)
         return {"users": users}
+
+    async def _sql_create_database(self, params: dict) -> dict:
+        instance = params.get("instance")
+        name = params.get("name")
+        charset = params.get("charset", "UTF8")
+        collation = params.get("collation", "en_US.UTF8")
+        
+        if not instance or not name:
+            raise ValueError("Instance and database name are required")
+            
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.create_database, instance, name, charset, collation)
+        return {"operation": result}
+
+    async def _sql_delete_database(self, params: dict) -> dict:
+        instance = params.get("instance")
+        name = params.get("name")
+        
+        if not instance or not name:
+            raise ValueError("Instance and database name are required")
+            
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.delete_database, instance, name)
+        return {"operation": result}
+
+    async def _sql_create_user(self, params: dict) -> dict:
+        instance = params.get("instance")
+        name = params.get("name")
+        password = params.get("password")
+        host = params.get("host", "%")
+        
+        if not instance or not name or not password:
+            raise ValueError("Instance, username and password are required")
+            
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.create_user, instance, name, password, host)
+        return {"operation": result}
+
+    async def _sql_delete_user(self, params: dict) -> dict:
+        instance = params.get("instance")
+        name = params.get("name")
+        host = params.get("host", "%")
+        
+        if not instance or not name:
+            raise ValueError("Instance and username are required")
+            
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.delete_user, instance, name, host)
+        return {"operation": result}
 
     async def _sql_start_proxy(self, params: dict) -> dict:
         connection_name = params.get("connection_name")
@@ -429,6 +577,13 @@ class JsonRpcHandler:
         
         manager = self._get_proxy_manager()
         actual_port = await manager.start_proxy(connection_name, port, db_type)
+        
+        # Broadcast update
+        await get_manager().broadcast({
+            "type": "sql_proxy_started",
+            "data": {"connection_name": connection_name, "port": actual_port}
+        })
+        
         return {"port": actual_port, "connection_name": connection_name}
 
     async def _sql_stop_proxy(self, params: dict) -> dict:
@@ -438,6 +593,13 @@ class JsonRpcHandler:
             
         manager = self._get_proxy_manager()
         success = await manager.stop_proxy(connection_name)
+        
+        if success:
+            await get_manager().broadcast({
+                "type": "sql_proxy_stopped",
+                "data": {"connection_name": connection_name}
+            })
+            
         return {"success": success}
 
     def _sql_list_proxies(self, params: dict) -> dict:

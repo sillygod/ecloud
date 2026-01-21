@@ -15,6 +15,9 @@
 (require 'tabulated-list)
 (require 'ecloud-rpc)
 
+;; Hooking into ecloud-ws events if available
+(defvar ecloud-gar-event-hook nil)
+
 ;;; Customization
 
 (defgroup ecloud-gar nil
@@ -40,6 +43,10 @@
   '((t :inherit default))
   "Face for tag names."
   :group 'ecloud-gar)
+
+;; Buffer local for auto-refresh check
+(defvar-local ecloud-gar--refresh-pending nil
+  "If non-nil, refresh on next event.")
 
 ;;; Buffer-local state
 
@@ -128,6 +135,39 @@ Returns t if confirmed."
     (setq tabulated-list-format [("Repository" 30 t) ("Format" 10 t) ("Description" 40 nil)])
     (setq tabulated-list-entries #'ecloud-gar--fetch-repos)))
   (tabulated-list-init-header))
+
+(defun ecloud-gar--on-event (type data)
+  "Handle WebSocket event TYPE with DATA."
+  (cond
+   ((string= type "gar_pull_started")
+    (message "Started pulling %s..." (plist-get data :uri)))
+
+   ((string= type "gar_pull_finished")
+    (message "Finished pulling %s" (plist-get data :uri)))
+
+   ((string= type "gar_push_started")
+    (message "Started pushing %s..." (plist-get data :uri)))
+
+   ((string= type "gar_push_finished")
+    (message "Finished pushing %s" (plist-get data :uri)))
+
+   ((string= type "gar_package_deleted")
+    (let ((pkg (plist-get data :package)))
+      (message "Deleted package %s" pkg)
+      ;; Refresh if we are viewing the repo that contained this package
+      (when (and (string-prefix-p (or ecloud-gar--current-repo "") pkg)
+                 (get-buffer "*ECloud-GAR*"))
+        (with-current-buffer "*ECloud-GAR*"
+          (ecloud-gar--refresh-data)))))
+   
+   ((string= type "gar_tag_deleted")
+    (let ((name (plist-get data :name)))
+      (message "Deleted tag %s" name)
+      ;; Refresh if we are viewing the package that contained this tag
+      (when (and (string-prefix-p (or ecloud-gar--current-package "") name)
+                 (get-buffer "*ECloud-GAR*"))
+        (with-current-buffer "*ECloud-GAR*"
+          (ecloud-gar--refresh-data)))))))
 
 (defun ecloud-gar--update-header ()
   "Update header line."
@@ -221,12 +261,12 @@ Returns t if confirmed."
         (setq uri (aref entry 1)))))
     
     (when (and uri (yes-or-no-p (format "Pull %s? " uri)))
-      (message "Pulling %s..." uri)
-      (condition-case err
-          (progn
-            (ecloud-rpc-gar-pull uri)
-            (message "Pulled %s" uri))
-        (error (message "Pull failed: %s" (error-message-string err)))))))
+      (message "Requesting pull for %s..." uri)
+      (ecloud-rpc-gar-pull-async 
+       uri
+       (lambda (_resp) nil) ;; Updates via WebSocket
+       (lambda (err)
+         (message "Pull request failed: %s" err))))))
 
 (defun ecloud-gar-tag ()
   "Create a new tag for the current image version."
@@ -257,22 +297,23 @@ Returns t if confirmed."
         ;; Delete Tag
         (let ((tag-name (substring-no-properties (aref entry 0))))
           (when (ecloud-gar--confirm-delete tag-name "tag")
-            (message "Deleting tag %s..." tag-name)
-            (ecloud-rpc-gar-delete-tag id) ;; id is full version resource? wait, gar_delete_tag expects tag resource name
-            ;; My backend gar_delete_tag takes tag resource name.
-            ;; In fetch-tags, I used 'version' as ID. Let's fix fetch-tags to use tag full name as ID.
-            ;; Wait, `list_tags` returns TagInfo(name=tag.name (full), version=tag.version).
-            ;; Let's check ecloud-gar--fetch-tags implementation.
-            ;; OK, let's fix ID in fetch-tags.
-            (ecloud-gar-refresh))))
+            (message "Requesting delete for tag %s..." tag-name)
+            (ecloud-rpc-gar-delete-tag-async 
+             id
+             (lambda (_resp) nil) ;; Updates via WebSocket
+             (lambda (err)
+               (message "Delete request failed: %s" err))))))
        (ecloud-gar--current-repo
         ;; Delete Package (Image)
         (let ((pkg-name (substring-no-properties (aref entry 0))))
           (when (ecloud-gar--confirm-delete pkg-name "image")
-             (message "Deleting image %s..." pkg-name)
+             (message "Requesting delete for image %s..." pkg-name)
              ;; id is package full name
-             (ecloud-rpc-gar-delete-package id)
-             (ecloud-gar-refresh))))
+             (ecloud-rpc-gar-delete-package-async 
+              id
+              (lambda (_resp) nil) ;; Updates via WebSocket
+              (lambda (err)
+                (message "Delete request failed: %s" err))))))
        (t
         (message "Cannot delete repository via Emacs"))))))
 
@@ -301,7 +342,8 @@ Returns t if confirmed."
 (define-derived-mode ecloud-gar-mode tabulated-list-mode "ECloud-GAR"
   "Major mode for browsing Artifact Registry."
   (setq tabulated-list-padding 2)
-  (add-hook 'tabulated-list-revert-hook #'ecloud-gar--refresh-data nil t))
+  (add-hook 'tabulated-list-revert-hook #'ecloud-gar--refresh-data nil t)
+  (add-hook 'ecloud-gar-event-hook #'ecloud-gar--on-event nil t))
 
 ;;; Evil mode
 (with-eval-after-load 'evil

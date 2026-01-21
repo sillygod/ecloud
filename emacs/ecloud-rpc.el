@@ -157,6 +157,14 @@ ERROR-CALLBACK is called with error message on failure."
                             :object_path object-path
                             :local_path local-path)))
 
+(defun ecloud-rpc-download-async (bucket object-path local-path callback &optional error-callback)
+  "Download OBJECT-PATH from BUCKET to LOCAL-PATH asynchronously."
+  (ecloud-rpc-request-async "download_object" callback 
+                            (list :bucket bucket
+                                  :object_path object-path
+                                  :local_path local-path)
+                            error-callback))
+
 (defun ecloud-rpc-upload (bucket object-path local-path)
   "Upload LOCAL-PATH to OBJECT-PATH in BUCKET."
   (ecloud-rpc-request "upload_object"
@@ -164,17 +172,39 @@ ERROR-CALLBACK is called with error message on failure."
                             :object_path object-path
                             :local_path local-path)))
 
+(defun ecloud-rpc-upload-async (bucket object-path local-path callback &optional error-callback)
+  "Upload LOCAL-PATH to OBJECT-PATH in BUCKET asynchronously."
+  (ecloud-rpc-request-async "upload_object" callback
+                            (list :bucket bucket
+                                  :object_path object-path
+                                  :local_path local-path)
+                            error-callback))
+
 (defun ecloud-rpc-delete (bucket object-path)
   "Delete OBJECT-PATH from BUCKET."
   (ecloud-rpc-request "delete_object"
                       (list :bucket bucket
                             :object_path object-path)))
 
+(defun ecloud-rpc-delete-async (bucket object-path callback &optional error-callback)
+  "Delete OBJECT-PATH from BUCKET asynchronously."
+  (ecloud-rpc-request-async "delete_object" callback
+                            (list :bucket bucket
+                                  :object_path object-path)
+                            error-callback))
+
 (defun ecloud-rpc-create-folder (bucket folder-path)
   "Create FOLDER-PATH in BUCKET."
   (ecloud-rpc-request "create_folder"
                       (list :bucket bucket
                             :folder_path folder-path)))
+
+(defun ecloud-rpc-create-folder-async (bucket folder-path callback &optional error-callback)
+  "Create FOLDER-PATH in BUCKET asynchronously."
+  (ecloud-rpc-request-async "create_folder" callback
+                            (list :bucket bucket
+                                  :folder_path folder-path)
+                            error-callback))
 
 ;;; GAR Operations
 
@@ -198,17 +228,33 @@ ERROR-CALLBACK is called with error message on failure."
   "Delete PACKAGE and all its tags."
   (ecloud-rpc-request "gar_delete_package" (list :package package)))
 
+(defun ecloud-rpc-gar-delete-package-async (package callback &optional error-callback)
+  "Delete PACKAGE asynchronously."
+  (ecloud-rpc-request-async "gar_delete_package" callback (list :package package) error-callback))
+
 (defun ecloud-rpc-gar-delete-tag (name)
   "Delete tag NAME."
   (ecloud-rpc-request "gar_delete_tag" (list :name name)))
+
+(defun ecloud-rpc-gar-delete-tag-async (name callback &optional error-callback)
+  "Delete tag NAME asynchronously."
+  (ecloud-rpc-request-async "gar_delete_tag" callback (list :name name) error-callback))
 
 (defun ecloud-rpc-gar-pull (uri)
   "Pull docker image URI."
   (ecloud-rpc-request "gar_pull" (list :uri uri)))
 
+(defun ecloud-rpc-gar-pull-async (uri callback &optional error-callback)
+  "Pull docker image URI asynchronously."
+  (ecloud-rpc-request-async "gar_pull" callback (list :uri uri) error-callback))
+
 (defun ecloud-rpc-gar-push (uri)
   "Push docker image URI."
   (ecloud-rpc-request "gar_push" (list :uri uri)))
+
+(defun ecloud-rpc-gar-push-async (uri callback &optional error-callback)
+  "Push docker image URI asynchronously."
+  (ecloud-rpc-request-async "gar_push" callback (list :uri uri) error-callback))
 
 (defun ecloud-rpc-gar-tag (source target)
   "Tag docker image SOURCE as TARGET."
@@ -255,13 +301,71 @@ ERROR-CALLBACK is called with error message on failure."
   "List all Cloud SQL instances."
   (ecloud-rpc-request "sql_list_instances" nil))
 
+(defun ecloud-rpc-sql-list-instances-async (callback &optional error-callback)
+  "List all Cloud SQL instances asynchronously."
+  (ecloud-rpc-request-async "sql_list_instances" callback nil error-callback))
+
 (defun ecloud-rpc-sql-list-databases (instance)
   "List databases for INSTANCE."
   (ecloud-rpc-request "sql_list_databases" (list :instance instance)))
 
+(defun ecloud-rpc-sql-list-databases-async (instance callback &optional error-callback)
+  "List databases for INSTANCE asynchronously."
+  (ecloud-rpc-request-async "sql_list_databases" callback (list :instance instance) error-callback))
+
 (defun ecloud-rpc-sql-list-users (instance)
   "List users for INSTANCE."
   (ecloud-rpc-request "sql_list_users" (list :instance instance)))
+
+(defun ecloud-rpc-sql-create-database (instance name &optional charset collation)
+  "Create database NAME in INSTANCE."
+  (let ((params (list :instance instance :name name)))
+    (when charset (setq params (plist-put params :charset charset)))
+    (when collation (setq params (plist-put params :collation collation)))
+    (ecloud-rpc-request "sql_create_database" params)))
+
+(defun ecloud-rpc-sql-create-database-async (instance name charset collation callback &optional error-callback)
+  "Create database asynchronously."
+  (let ((params (list :instance instance :name name)))
+    (when charset (setq params (plist-put params :charset charset)))
+    (when collation (setq params (plist-put params :collation collation)))
+    (ecloud-rpc-request-async "sql_create_database" callback params error-callback)))
+
+(defun ecloud-rpc-sql-delete-database (instance name)
+  "Delete database NAME from INSTANCE."
+  (ecloud-rpc-request "sql_delete_database" (list :instance instance :name name)))
+
+(defun ecloud-rpc-sql-delete-database-async (instance name callback &optional error-callback)
+  "Delete database asynchronously."
+  (ecloud-rpc-request-async "sql_delete_database" callback (list :instance instance :name name) error-callback))
+
+(defun ecloud-rpc-sql-list-users-async (instance callback &optional error-callback)
+  "List users for INSTANCE asynchronously."
+  (ecloud-rpc-request-async "sql_list_users" callback (list :instance instance) error-callback))
+
+(defun ecloud-rpc-sql-create-user (instance name password &optional host)
+  "Create user NAME in INSTANCE."
+  (let ((params (list :instance instance :name name :password password)))
+    (when host (setq params (plist-put params :host host)))
+    (ecloud-rpc-request "sql_create_user" params)))
+
+(defun ecloud-rpc-sql-create-user-async (instance name password host callback &optional error-callback)
+  "Create user asynchronously."
+  (let ((params (list :instance instance :name name :password password)))
+    (when host (setq params (plist-put params :host host)))
+    (ecloud-rpc-request-async "sql_create_user" callback params error-callback)))
+
+(defun ecloud-rpc-sql-delete-user (instance name &optional host)
+  "Delete user NAME from INSTANCE."
+  (let ((params (list :instance instance :name name)))
+    (when host (setq params (plist-put params :host host)))
+    (ecloud-rpc-request "sql_delete_user" params)))
+
+(defun ecloud-rpc-sql-delete-user-async (instance name host callback &optional error-callback)
+  "Delete user asynchronously."
+  (let ((params (list :instance instance :name name)))
+    (when host (setq params (plist-put params :host host)))
+    (ecloud-rpc-request-async "sql_delete_user" callback params error-callback)))
 
 (defun ecloud-rpc-sql-start-proxy (connection-name &optional port db-type)
   "Start proxy for CONNECTION-NAME.
@@ -271,13 +375,28 @@ Returns plist with :port."
     (when db-type (setq params (plist-put params :db_type db-type)))
     (ecloud-rpc-request "sql_start_proxy" params)))
 
+(defun ecloud-rpc-sql-start-proxy-async (connection-name port db-type callback &optional error-callback)
+  "Start proxy asynchronously."
+  (let ((params (list :connection_name connection-name)))
+    (when port (setq params (plist-put params :port port)))
+    (when db-type (setq params (plist-put params :db_type db-type)))
+    (ecloud-rpc-request-async "sql_start_proxy" callback params error-callback)))
+
 (defun ecloud-rpc-sql-stop-proxy (connection-name)
   "Stop proxy for CONNECTION-NAME."
   (ecloud-rpc-request "sql_stop_proxy" (list :connection_name connection-name)))
 
+(defun ecloud-rpc-sql-stop-proxy-async (connection-name callback &optional error-callback)
+  "Stop proxy asynchronously."
+  (ecloud-rpc-request-async "sql_stop_proxy" callback (list :connection_name connection-name) error-callback))
+
 (defun ecloud-rpc-sql-list-proxies ()
   "List active proxies."
   (ecloud-rpc-request "sql_list_proxies" nil))
+
+(defun ecloud-rpc-sql-list-proxies-async (callback &optional error-callback)
+  "List active proxies asynchronously."
+  (ecloud-rpc-request-async "sql_list_proxies" callback nil error-callback))
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

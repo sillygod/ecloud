@@ -49,6 +49,8 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-sql.el")
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-rpc.el")
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-compute.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ws.el")
+
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
 ;; (setq ecloud-server-url "http://localhost:8765/jsonrpc")
@@ -59,7 +61,10 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 - `M-x ecloud-browse` - 開啟 GCS 瀏覽器
 - `M-x ecloud-server-status` - 檢查 server 連線
 - `M-x ecloud-ips-list` - 管理靜態 IP
+- `M-x ecloud-ips-list` - 管理靜態 IP
 - `M-x ecloud-compute-list` - 管理 VM 實例與 SSH
+- `M-x ecloud-sql-list` - 管理 Cloud SQL 與 Proxy
+- `M-x ecloud-ws-connect` - 連線 WebSocket (即時更新)
 
 ## 瀏覽器快捷鍵 (GCS)
 
@@ -75,8 +80,34 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 | `c` | 複製 gs:// URL |
 | `q` | 關閉視窗 |
 
-> [!NOTE]
 > 如果您使用 **Evil mode**，上述按鍵在 `normal` state 下也支援。
+
+## Cloud SQL
+
+使用 `M-x ecloud-sql-list` 管理 SQL 實例。支援透過 `cloud-sql-python-connector` 建立安全的 TCP Proxy。
+
+| 按鍵 | 功能 |
+|------|------|
+| `p` | 啟動/停止 TCP Proxy (本地連線用) |
+| `d` | 列出資料庫 |
+| `u` | 列出使用者 |
+| `+ d` | 建立資料庫 |
+| `D d` | 刪除資料庫 |
+| `+ u` | 建立使用者 |
+| `D u` | 刪除使用者 |
+| `r` | 重新整理 |
+
+## Real-time Updates (WebSockets)
+
+支援透過 WebSocket 進行即時狀態更新：
+- **Cloud SQL Proxy**: 啟動/停止時即時更新列表狀態 (Proxy Column)。
+- **GCS**: 上傳/下載/刪除動作完成後，自動重新整理檔案列表。
+- **GAR**: Docker Pull/Push 或刪除動作完成後，自動重新整理列表。
+
+載入 `ecloud-ws.el` 時會自動嘗試連線。若需手動連線，可執行 `M-x ecloud-ws-connect`。
+
+可透過設定 `ecloud-ws-auto-connect` 為 `nil` 來關閉自動連線。
+
 
 ## Artifact Registry (GAR)
 
