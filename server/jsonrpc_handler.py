@@ -7,10 +7,13 @@ to the appropriate GCS client operations.
 from dataclasses import dataclass
 from typing import Any, Callable
 from pydantic import BaseModel
+import asyncio
 
 from gcs_client import get_gcs_client, GCSClient
 from gar_client import get_gar_client, GARClient
 from compute_client import get_compute_client, ComputeClient
+from sql_client import get_sql_client, SQLClient
+from sql_proxy import get_proxy_manager, SQLProxyManager
 from config import config
 
 
@@ -84,12 +87,19 @@ class JsonRpcHandler:
             "compute_reserve_address": self._compute_reserve_address,
             "compute_list_regions": self._compute_list_regions,
             "compute_list_instances": self._compute_list_instances,
+            # SQL methods
+            "sql_list_instances": self._sql_list_instances,
+            "sql_list_databases": self._sql_list_databases,
+            "sql_list_users": self._sql_list_users,
+            "sql_start_proxy": self._sql_start_proxy,
+            "sql_stop_proxy": self._sql_stop_proxy,
+            "sql_list_proxies": self._sql_list_proxies,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
         }
     
-    def handle(self, request: JsonRpcRequest) -> JsonRpcResponse:
+    async def handle(self, request: JsonRpcRequest) -> JsonRpcResponse:
         """Handle a JSON-RPC request.
         
         Args:
@@ -121,7 +131,10 @@ class JsonRpcHandler:
         
         # Execute method
         try:
-            result = method_fn(request.params)
+            if asyncio.iscoroutinefunction(method_fn):
+                result = await method_fn(request.params)
+            else:
+                result = method_fn(request.params)
             return JsonRpcResponse(id=request.id, result=result)
         except TypeError as e:
             return JsonRpcResponse(
@@ -135,6 +148,8 @@ class JsonRpcHandler:
             error_code = GCS_ERROR
             if "ArtifactRegistry" in type(e).__name__ or "Docker" in str(e):
                 error_code = GAR_ERROR
+            elif "Compute" in type(e).__name__:
+                error_code = COMPUTE_ERROR
                 
             return JsonRpcResponse(
                 id=request.id,
@@ -156,6 +171,13 @@ class JsonRpcHandler:
     def _get_compute_client(self) -> ComputeClient:
         """Get the Compute client instance."""
         return get_compute_client()
+
+    def _get_sql_client(self) -> SQLClient:
+        """Get the SQL client instance."""
+        return get_sql_client()
+    
+    def _get_proxy_manager(self) -> SQLProxyManager:
+        return get_proxy_manager()
     
     # --- GCS Method implementations ---
     
@@ -373,6 +395,55 @@ class JsonRpcHandler:
             "gcs_project": config.gcs_project,
             "impersonate_service_account": config.impersonate_service_account,
         }
+
+    # --- SQL Method implementations ---
+
+    def _sql_list_instances(self, params: dict) -> dict:
+        client = self._get_sql_client()
+        instances = client.list_instances()
+        return {"instances": instances}
+
+    def _sql_list_databases(self, params: dict) -> dict:
+        instance = params.get("instance")
+        if not instance:
+            raise TypeError("Missing parameter: instance")
+        client = self._get_sql_client()
+        databases = client.list_databases(instance)
+        return {"databases": databases}
+
+    def _sql_list_users(self, params: dict) -> dict:
+        instance = params.get("instance")
+        if not instance:
+            raise TypeError("Missing parameter: instance")
+        client = self._get_sql_client()
+        users = client.list_users(instance)
+        return {"users": users}
+
+    async def _sql_start_proxy(self, params: dict) -> dict:
+        connection_name = params.get("connection_name")
+        port = params.get("port", 0)
+        db_type = params.get("db_type", "POSTGRES")
+        
+        if not connection_name:
+            raise TypeError("Missing parameter: connection_name")
+        
+        manager = self._get_proxy_manager()
+        actual_port = await manager.start_proxy(connection_name, port, db_type)
+        return {"port": actual_port, "connection_name": connection_name}
+
+    async def _sql_stop_proxy(self, params: dict) -> dict:
+        connection_name = params.get("connection_name")
+        if not connection_name:
+            raise TypeError("Missing parameter: connection_name")
+            
+        manager = self._get_proxy_manager()
+        success = await manager.stop_proxy(connection_name)
+        return {"success": success}
+
+    def _sql_list_proxies(self, params: dict) -> dict:
+        manager = self._get_proxy_manager()
+        proxies = manager.list_proxies()
+        return {"proxies": proxies}
 
 
 # Singleton handler instance

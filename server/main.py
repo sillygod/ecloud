@@ -66,7 +66,7 @@ async def jsonrpc_endpoint(request: Request) -> Response:
     if isinstance(data, list):
         responses = []
         for item in data:
-            resp = _handle_single_request(item)
+            resp = await _handle_single_request(item)
             if resp is not None:  # Notifications don't return responses
                 responses.append(resp)
         return Response(
@@ -75,7 +75,7 @@ async def jsonrpc_endpoint(request: Request) -> Response:
         )
     
     # Handle single request
-    response = _handle_single_request(data)
+    response = await _handle_single_request(data)
     if response is None:
         # Notification - no response
         return Response(status_code=204)
@@ -86,7 +86,14 @@ async def jsonrpc_endpoint(request: Request) -> Response:
     )
 
 
-def _handle_single_request(data: dict) -> JsonRpcResponse | None:
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    from sql_proxy import get_proxy_manager
+    await get_proxy_manager().shutdown()
+
+
+async def _handle_single_request(data: dict) -> JsonRpcResponse | None:
     """Handle a single JSON-RPC request.
     
     Args:
@@ -109,7 +116,7 @@ def _handle_single_request(data: dict) -> JsonRpcResponse | None:
     # Notifications (id is null) don't require a response
     is_notification = rpc_request.id is None
     
-    response = handler.handle(rpc_request)
+    response = await handler.handle(rpc_request)
     
     if is_notification:
         return None

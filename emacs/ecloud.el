@@ -52,6 +52,7 @@
 (require 'ecloud-gar)
 (require 'ecloud-ips)
 (require 'ecloud-compute)
+(require 'ecloud-sql)
 
 ;;; User customization
 
@@ -77,6 +78,10 @@
 ;;;###autoload
 (autoload 'ecloud-compute-list "ecloud-compute"
   "Open the ECloud Compute instances browser." t)
+
+;;;###autoload
+(autoload 'ecloud-sql-list "ecloud-sql"
+  "Open the ECloud SQL instances browser." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

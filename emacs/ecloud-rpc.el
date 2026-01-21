@@ -248,5 +248,36 @@ ERROR-CALLBACK is called with error message on failure."
 
 
 
+
+;;; SQL Operations
+
+(defun ecloud-rpc-sql-list-instances ()
+  "List all Cloud SQL instances."
+  (ecloud-rpc-request "sql_list_instances" nil))
+
+(defun ecloud-rpc-sql-list-databases (instance)
+  "List databases for INSTANCE."
+  (ecloud-rpc-request "sql_list_databases" (list :instance instance)))
+
+(defun ecloud-rpc-sql-list-users (instance)
+  "List users for INSTANCE."
+  (ecloud-rpc-request "sql_list_users" (list :instance instance)))
+
+(defun ecloud-rpc-sql-start-proxy (connection-name &optional port db-type)
+  "Start proxy for CONNECTION-NAME.
+Returns plist with :port."
+  (let ((params (list :connection_name connection-name)))
+    (when port (setq params (plist-put params :port port)))
+    (when db-type (setq params (plist-put params :db_type db-type)))
+    (ecloud-rpc-request "sql_start_proxy" params)))
+
+(defun ecloud-rpc-sql-stop-proxy (connection-name)
+  "Stop proxy for CONNECTION-NAME."
+  (ecloud-rpc-request "sql_stop_proxy" (list :connection_name connection-name)))
+
+(defun ecloud-rpc-sql-list-proxies ()
+  "List active proxies."
+  (ecloud-rpc-request "sql_list_proxies" nil))
+
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

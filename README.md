@@ -46,7 +46,8 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ips.el")
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-browser.el")
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-gar.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ips.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-sql.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-rpc.el")
 (load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-compute.el")
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
