@@ -83,7 +83,7 @@
 (defun ecloud-browser-help ()
   "Show help for ecloud-browser-mode."
   (interactive)
-  (message "GCS Keys: [RET]Enter [^]Up [g]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [?]Help [q]Quit"))
+  (message "GCS Keys: [RET]Enter [^]Up [r]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [?]Help [q]Quit"))
 
 (defvar ecloud-browser-mode-map nil
   "Keymap for `ecloud-browser-mode'.")
@@ -92,7 +92,7 @@
   (setq ecloud-browser-mode-map (make-sparse-keymap))
   (define-key ecloud-browser-mode-map (kbd "RET") #'ecloud-browser-enter)
   (define-key ecloud-browser-mode-map (kbd "^") #'ecloud-browser-up)
-  (define-key ecloud-browser-mode-map (kbd "g") #'ecloud-browser-refresh)
+  (define-key ecloud-browser-mode-map (kbd "r") #'ecloud-browser-refresh)
   (define-key ecloud-browser-mode-map (kbd "d") #'ecloud-browser-download)
   (define-key ecloud-browser-mode-map (kbd "u") #'ecloud-browser-upload)
   (define-key ecloud-browser-mode-map (kbd "D") #'ecloud-browser-delete)
@@ -351,7 +351,7 @@
   (evil-define-key 'motion ecloud-browser-mode-map
     (kbd "RET") #'ecloud-browser-enter
     (kbd "^")   #'ecloud-browser-up
-    (kbd "g")   #'ecloud-browser-refresh
+    (kbd "r")   #'ecloud-browser-refresh
     (kbd "d")   #'ecloud-browser-download
     (kbd "u")   #'ecloud-browser-upload
     (kbd "D")   #'ecloud-browser-delete

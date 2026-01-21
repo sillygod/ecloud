@@ -9,6 +9,7 @@ dependencies = [
     "google-cloud-storage>=2.14.0",
     "pydantic>=2.5.0",
     "google-cloud-artifact-registry>=1.19.0",
+    "google-cloud-compute>=1.14.0",
 ]
 license = {text = "MIT"}
 authors = [

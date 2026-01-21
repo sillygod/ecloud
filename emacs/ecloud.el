@@ -36,7 +36,7 @@
 ;; Key bindings in ecloud-browser:
 ;;   RET   - Enter bucket/folder
 ;;   ^     - Go up one level
-;;   g     - Refresh
+;;   r     - Refresh
 ;;   d     - Download file at point
 ;;   u     - Upload file to current location
 ;;   D     - Delete file at point
@@ -50,6 +50,7 @@
 (require 'ecloud-browser)
 (require 'ecloud-commands)
 (require 'ecloud-gar)
+(require 'ecloud-ips)
 
 ;;; User customization
 
@@ -67,6 +68,10 @@
 ;;;###autoload
 (autoload 'ecloud-gar-browse "ecloud-gar"
   "Open the ECloud Artifact Registry browser." t)
+
+;;;###autoload
+(autoload 'ecloud-ips-list "ecloud-ips"
+  "Open the ECloud IP addresses browser." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

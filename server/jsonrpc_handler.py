@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from gcs_client import get_gcs_client, GCSClient
 from gar_client import get_gar_client, GARClient
+from compute_client import get_compute_client, ComputeClient
 
 
 # JSON-RPC 2.0 Error Codes
@@ -22,6 +23,7 @@ INTERNAL_ERROR = -32603
 GCS_ERROR = -32001
 NOT_FOUND = -32002
 GAR_ERROR = -32003
+COMPUTE_ERROR = -32004
 
 
 class JsonRpcRequest(BaseModel):
@@ -76,6 +78,10 @@ class JsonRpcHandler:
             "gar_pull": self._gar_pull,
             "gar_push": self._gar_push,
             "gar_tag": self._gar_tag,
+            # Compute methods
+            "compute_list_addresses": self._compute_list_addresses,
+            "compute_reserve_address": self._compute_reserve_address,
+            "compute_list_regions": self._compute_list_regions,
             # System
             "ping": self._ping,
         }
@@ -143,6 +149,10 @@ class JsonRpcHandler:
     def _get_gar_client(self) -> GARClient:
         """Get the GAR client instance."""
         return get_gar_client()
+
+    def _get_compute_client(self) -> ComputeClient:
+        """Get the Compute client instance."""
+        return get_compute_client()
     
     # --- GCS Method implementations ---
     
@@ -316,6 +326,34 @@ class JsonRpcHandler:
         if not source or not target:
             raise TypeError("Missing parameters: source, target")
         return self._get_gar_client().docker_tag(source, target)
+
+    # --- Compute Method implementations ---
+
+    def _compute_list_addresses(self, params: dict) -> dict:
+        """List all static IP addresses (regional and global)."""
+        client = self._get_compute_client()
+        addresses = client.list_addresses()
+        return {
+            "addresses": [a.to_dict() for a in addresses],
+            "count": len(addresses),
+        }
+
+    def _compute_reserve_address(self, params: dict) -> dict:
+        """Reserve a new external static IP address."""
+        region = params.get("region")
+        name = params.get("name")
+        
+        if not region or not name:
+            raise TypeError("Missing required parameters: region, name")
+        
+        client = self._get_compute_client()
+        return client.reserve_address(region, name)
+
+    def _compute_list_regions(self, params: dict) -> dict:
+        """List available regions for IP address reservation."""
+        client = self._get_compute_client()
+        regions = client.list_regions()
+        return {"regions": regions}
 
 
 # Singleton handler instance

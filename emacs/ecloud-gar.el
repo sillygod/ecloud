@@ -281,7 +281,7 @@ Returns t if confirmed."
 (defun ecloud-gar-help ()
   "Show help for ecloud-gar-mode."
   (interactive)
-  (message "GAR Keys: [RET]Enter [^]Up [g]Refresh [P]Pull [D]Delete [t]Tag [?]Help [q]Quit"))
+  (message "GAR Keys: [RET]Enter [^]Up [r]Refresh [P]Pull [D]Delete [t]Tag [?]Help [q]Quit"))
 
 (defvar ecloud-gar-mode-map nil
   "Keymap for `ecloud-gar-mode'.")
@@ -290,7 +290,7 @@ Returns t if confirmed."
   (setq ecloud-gar-mode-map (make-sparse-keymap))
   (define-key ecloud-gar-mode-map (kbd "RET") #'ecloud-gar-enter)
   (define-key ecloud-gar-mode-map (kbd "^") #'ecloud-gar-up)
-  (define-key ecloud-gar-mode-map (kbd "g") #'ecloud-gar-refresh)
+  (define-key ecloud-gar-mode-map (kbd "r") #'ecloud-gar-refresh)
   (define-key ecloud-gar-mode-map (kbd "P") #'ecloud-gar-pull)
   (define-key ecloud-gar-mode-map (kbd "D") #'ecloud-gar-delete)
   (define-key ecloud-gar-mode-map (kbd "t") #'ecloud-gar-tag)
@@ -309,7 +309,7 @@ Returns t if confirmed."
   (evil-define-key 'motion ecloud-gar-mode-map
     (kbd "RET") #'ecloud-gar-enter
     (kbd "^")   #'ecloud-gar-up
-    (kbd "g")   #'ecloud-gar-refresh
+    (kbd "r")   #'ecloud-gar-refresh
     (kbd "P")   #'ecloud-gar-pull
     (kbd "D")   #'ecloud-gar-delete
     (kbd "t")   #'ecloud-gar-tag

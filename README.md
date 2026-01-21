@@ -37,8 +37,15 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 在你的 `init.el` 加入：
 
 ```elisp
-(add-to-list 'load-path "/Users/jing/Desktop/ecloud/emacs")
+(add-to-list 'load-path "/yourpath/ecloud/emacs")
 (require 'ecloud)
+
+;; when you want to reload modified code
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ips.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-browser.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-gar.el")
+(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ips.el")
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
 ;; (setq ecloud-server-url "http://localhost:8765/jsonrpc")

@@ -221,6 +221,21 @@ ERROR-CALLBACK is called with error message on failure."
                             :tag_id tag-id
                             :version version)))
 
+;;; Compute Operations
+
+(defun ecloud-rpc-compute-list-addresses ()
+  "List all static IP addresses (regional and global)."
+  (ecloud-rpc-request "compute_list_addresses" nil))
+
+(defun ecloud-rpc-compute-reserve-address (region name)
+  "Reserve a new external static IP address in REGION with NAME."
+  (ecloud-rpc-request "compute_reserve_address"
+                      (list :region region :name name)))
+
+(defun ecloud-rpc-compute-list-regions ()
+  "List available regions for IP address reservation."
+  (ecloud-rpc-request "compute_list_regions" nil))
+
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here
