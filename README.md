@@ -1,6 +1,6 @@
-# ECloud - Emacs Google Cloud Storage Browser
+# ECloud - Emacs Google Cloud Manager
 
-透過 Emacs 直接管理 Google Cloud Storage，使用 JSON-RPC 與 FastAPI server 溝通。
+透過 Emacs 直接管理 Google Cloud Platform (GCP) 資源，包含 Storage, Compute Engine, SQL 與 Artifact Registry。使用 JSON-RPC 與 FastAPI server 溝通。
 
 ## 需求
 
@@ -20,7 +20,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account.json
 ### 2. 啟動 Python Server
 
 ```bash
-cd /Users/jing/Desktop/ecloud/server
+cd /yourpath/ecloud/server
 uv sync  # 安裝依賴
 uv run uvicorn main:app --port 8765
 ```
@@ -42,14 +42,16 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (require 'ecloud)
 
 ;; when you want to reload modified code
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ips.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-browser.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-gar.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-sql.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-rpc.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-compute.el")
-(load-file "/Users/jing/Downloads/mycrafts/ecloud/emacs/ecloud-ws.el")
+(load-file "/yourpath/ecloud/emacs/ecloud.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-ips.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-browser.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-gar.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-sql.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-rpc.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-compute.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-k8s.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-ws.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-commands.el")
 
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
@@ -61,9 +63,9 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 - `M-x ecloud-browse` - 開啟 GCS 瀏覽器
 - `M-x ecloud-server-status` - 檢查 server 連線
 - `M-x ecloud-ips-list` - 管理靜態 IP
-- `M-x ecloud-ips-list` - 管理靜態 IP
 - `M-x ecloud-compute-list` - 管理 VM 實例與 SSH
 - `M-x ecloud-sql-list` - 管理 Cloud SQL 與 Proxy
+- `M-x ecloud-k8s-list` - 管理 GKE Clusters 與 K8s 資源
 - `M-x ecloud-ws-connect` - 連線 WebSocket (即時更新)
 
 ## 瀏覽器快捷鍵 (GCS)
@@ -81,6 +83,29 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 | `q` | 關閉視窗 |
 
 > 如果您使用 **Evil mode**，上述按鍵在 `normal` state 下也支援。
+
+## Kubernetes (GKE)
+
+使用 `M-x ecloud-k8s-list` 管理 GKE Clusters。連線後可檢視 Pods, Services, Ingresses, Deployments 等資源。
+
+### 支援功能
+- **多視圖切換**：Pods (`p`), Services (`s`), Ingresses (`i`), Deployments (`d`), Namespaces (`n`)。
+- **日誌串流**：即時查看 Pod Logs (WebSocket)。
+- **YAML 檢視**：快速查看資源定義。
+
+### 快捷鍵
+
+| 按鍵 | 功能 |
+|------|------|
+| `RET` | 連線 Cluster / 查看 Log / 查看 YAML |
+| `p` / `s` / `i` / `d` / `n` | 切換視圖 (Pods, Services, Ingresses, Deployments, Namespaces) |
+| `N` | 設定 Namespace Filter |
+| `y` | 查看資源 YAML |
+| `l` | 查看 Logs (靜態) |
+| `L` | 開始 Logs Streaming |
+| `r` | 重新整理 |
+| `Q` | 斷開 Cluster 連線 |
+| `q` | 關閉視窗 |
 
 ## Cloud SQL
 
@@ -100,6 +125,7 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 ## Real-time Updates (WebSockets)
 
 支援透過 WebSocket 進行即時狀態更新：
+- **K8s Logs**: 支援即時 Log Streaming。
 - **Cloud SQL Proxy**: 啟動/停止時即時更新列表狀態 (Proxy Column)。
 - **GCS**: 上傳/下載/刪除動作完成後，自動重新整理檔案列表。
 - **GAR**: Docker Pull/Push 或刪除動作完成後，自動重新整理列表。
@@ -161,6 +187,18 @@ gcloud iam service-accounts add-iam-policy-binding [SA_EMAIL] \
     --member="user:[YOUR_EMAIL]" \
     --role="roles/iam.serviceAccountTokenCreator"
 ```
+
+## 實用指令 (Utility Commands)
+
+除了瀏覽器介面外，ECloud 也提供了一些獨立指令供快速操作：
+
+| 指令 | 說明 |
+|------|------|
+| `ecloud-upload-buffer` | 將當前 Buffer 內容直接上傳至 GCS |
+| `ecloud-upload-file` | 上傳本地檔案至 GCS |
+| `ecloud-download-file` | 從 GCS 下載檔案 |
+| `ecloud-copy-gs-url` | 選取檔案並複製 `gs://` URL |
+| `ecloud-delete-object` | 刪除 GCS 物件 |
 
 ## 環境變數
 

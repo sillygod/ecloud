@@ -12,6 +12,9 @@ dependencies = [
     "google-cloud-compute>=1.14.0",
     "google-api-python-client>=2.0.0",
     "cloud-sql-python-connector>=1.0.0",
+    "google-cloud-container>=2.0.0",
+    "kubernetes>=29.0.0",
+    "PyYAML>=6.0.0",
 ]
 license = {text = "MIT"}
 authors = [

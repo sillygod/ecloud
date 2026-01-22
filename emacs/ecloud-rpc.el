@@ -398,5 +398,133 @@ Returns plist with :port."
   "List active proxies asynchronously."
   (ecloud-rpc-request-async "sql_list_proxies" callback nil error-callback))
 
+;;; K8s Operations
+
+(defun ecloud-rpc-k8s-list-clusters (&optional location)
+  "List GKE clusters. LOCATION defaults to all (-).."
+  (ecloud-rpc-request "k8s_list_clusters" (list :location (or location "-"))))
+
+(defun ecloud-rpc-k8s-list-clusters-async (callback &optional location error-callback)
+  "List GKE clusters asynchronously."
+  (ecloud-rpc-request-async "k8s_list_clusters" callback 
+                            (list :location (or location "-")) error-callback))
+
+(defun ecloud-rpc-k8s-connect (cluster location)
+  "Connect to CLUSTER in LOCATION."
+  (ecloud-rpc-request "k8s_connect" (list :cluster cluster :location location)))
+
+(defun ecloud-rpc-k8s-connect-async (cluster location callback &optional error-callback)
+  "Connect to cluster asynchronously."
+  (ecloud-rpc-request-async "k8s_connect" callback 
+                            (list :cluster cluster :location location) error-callback))
+
+(defun ecloud-rpc-k8s-disconnect ()
+  "Disconnect from current cluster."
+  (ecloud-rpc-request "k8s_disconnect" nil))
+
+(defun ecloud-rpc-k8s-connection-status ()
+  "Get current connection status."
+  (ecloud-rpc-request "k8s_connection_status" nil))
+
+(defun ecloud-rpc-k8s-list-namespaces ()
+  "List namespaces."
+  (ecloud-rpc-request "k8s_list_namespaces" nil))
+
+(defun ecloud-rpc-k8s-list-namespaces-async (callback &optional error-callback)
+  "List namespaces asynchronously."
+  (ecloud-rpc-request-async "k8s_list_namespaces" callback nil error-callback))
+
+(defun ecloud-rpc-k8s-list-pods (&optional namespace label-selector)
+  "List pods. NAMESPACE empty means all. LABEL-SELECTOR for filtering."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when label-selector (setq params (plist-put params :label_selector label-selector)))
+    (ecloud-rpc-request "k8s_list_pods" params)))
+
+(defun ecloud-rpc-k8s-list-pods-async (callback &optional namespace label-selector error-callback)
+  "List pods asynchronously."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when label-selector (setq params (plist-put params :label_selector label-selector)))
+    (ecloud-rpc-request-async "k8s_list_pods" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-list-services (&optional namespace)
+  "List services."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request "k8s_list_services" params)))
+
+(defun ecloud-rpc-k8s-list-services-async (callback &optional namespace error-callback)
+  "List services asynchronously."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request-async "k8s_list_services" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-list-ingresses (&optional namespace)
+  "List ingresses."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request "k8s_list_ingresses" params)))
+
+(defun ecloud-rpc-k8s-list-ingresses-async (callback &optional namespace error-callback)
+  "List ingresses asynchronously."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request-async "k8s_list_ingresses" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-list-deployments (&optional namespace)
+  "List deployments."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request "k8s_list_deployments" params)))
+
+(defun ecloud-rpc-k8s-list-deployments-async (callback &optional namespace error-callback)
+  "List deployments asynchronously."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request-async "k8s_list_deployments" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-get-yaml (kind name namespace)
+  "Get YAML for resource of KIND with NAME in NAMESPACE."
+  (ecloud-rpc-request "k8s_get_yaml" (list :kind kind :name name :namespace namespace)))
+
+(defun ecloud-rpc-k8s-get-yaml-async (kind name namespace callback &optional error-callback)
+  "Get YAML asynchronously."
+  (ecloud-rpc-request-async "k8s_get_yaml" callback 
+                            (list :kind kind :name name :namespace namespace) error-callback))
+
+(defun ecloud-rpc-k8s-pod-logs (name namespace &optional container tail-lines)
+  "Get pod logs for NAME in NAMESPACE."
+  (let ((params (list :name name :namespace namespace)))
+    (when container (setq params (plist-put params :container container)))
+    (when tail-lines (setq params (plist-put params :tail_lines tail-lines)))
+    (ecloud-rpc-request "k8s_pod_logs" params)))
+
+(defun ecloud-rpc-k8s-pod-logs-async (name namespace callback &optional container tail-lines error-callback)
+  "Get pod logs asynchronously."
+  (let ((params (list :name name :namespace namespace)))
+    (when container (setq params (plist-put params :container container)))
+    (when tail-lines (setq params (plist-put params :tail_lines tail-lines)))
+    (ecloud-rpc-request-async "k8s_pod_logs" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-start-log-stream (&optional namespace label-selector pod-name container text-filter tail-lines)
+  "Start log stream. Returns stream-id."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when label-selector (setq params (plist-put params :label_selector label-selector)))
+    (when pod-name (setq params (plist-put params :pod_name pod-name)))
+    (when container (setq params (plist-put params :container container)))
+    (when text-filter (setq params (plist-put params :text_filter text-filter)))
+    (when tail-lines (setq params (plist-put params :tail_lines tail-lines)))
+    (ecloud-rpc-request "k8s_start_log_stream" params)))
+
+(defun ecloud-rpc-k8s-stop-log-stream (stream-id)
+  "Stop log STREAM-ID."
+  (ecloud-rpc-request "k8s_stop_log_stream" (list :stream_id stream-id)))
+
+(defun ecloud-rpc-k8s-list-log-streams ()
+  "List active log streams."
+  (ecloud-rpc-request "k8s_list_log_streams" nil))
+
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

@@ -17,7 +17,7 @@
 (require 'ecloud-rpc)
 
 (defvar ecloud-ws-client nil "The active WebSocket client.")
-(defvar ecloud-ws-client nil "The active WebSocket client.")
+
 (defcustom ecloud-ws-url "ws://127.0.0.1:8765/ws" "WebSocket URL."
   :type 'string
   :group 'ecloud)
@@ -71,6 +71,8 @@
       (ecloud-ws--on-gcs-event type data))
      ((string-prefix-p "gar_" type)
       (ecloud-ws--on-gar-event type data))
+     ((string-prefix-p "k8s_" type)
+      (ecloud-ws--on-k8s-event type data))
      (t (message "Unknown ECloud event: %s" type)))))
 
 ;; Event Handlers
@@ -87,6 +89,17 @@
   "Handle GAR event TYPE with DATA."
   (run-hook-with-args 'ecloud-gar-event-hook type data))
 
+(defun ecloud-ws--on-k8s-event (type data)
+  "Handle K8s event TYPE with DATA."
+  (cond
+   ((string= type "k8s_log")
+    (run-hook-with-args 'ecloud-k8s-log-hook data))
+   ((string= type "k8s_log_stream_started")
+    (run-hook-with-args 'ecloud-k8s-event-hook type data))
+   ((string= type "k8s_log_stream_stopped")
+    (run-hook-with-args 'ecloud-k8s-event-hook type data))
+   (t (run-hook-with-args 'ecloud-k8s-event-hook type data))))
+
 ;; Hooks
 
 (defvar ecloud-sql-event-hook nil
@@ -100,6 +113,14 @@ Functions are called with (TYPE DATA).")
 (defvar ecloud-gar-event-hook nil
   "Hook run when GAR state changes.
 Functions are called with (TYPE DATA).")
+
+(defvar ecloud-k8s-event-hook nil
+  "Hook run when K8s events occur.
+Functions are called with (TYPE DATA).")
+
+(defvar ecloud-k8s-log-hook nil
+  "Hook run when K8s log lines arrive.
+Functions are called with (DATA) containing stream_id, pod, container, line.")
 
 (provide 'ecloud-ws)
 

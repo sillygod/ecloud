@@ -53,6 +53,7 @@
 (require 'ecloud-ips)
 (require 'ecloud-compute)
 (require 'ecloud-sql)
+(require 'ecloud-k8s)
 
 ;;; User customization
 
@@ -82,6 +83,10 @@
 ;;;###autoload
 (autoload 'ecloud-sql-list "ecloud-sql"
   "Open the ECloud SQL instances browser." t)
+
+;;;###autoload
+(autoload 'ecloud-k8s-list "ecloud-k8s"
+  "Open the ECloud Kubernetes browser." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

@@ -15,7 +15,8 @@ from gar_client import get_gar_client, GARClient
 from compute_client import get_compute_client, ComputeClient
 from sql_client import get_sql_client, SQLClient
 from sql_proxy import get_proxy_manager, SQLProxyManager
-from sql_proxy import get_proxy_manager, SQLProxyManager
+from k8s_client import get_k8s_client, K8sClient
+from k8s_log_streamer import get_log_streamer, K8sLogStreamer
 from config import config
 from websocket_manager import get_manager
 
@@ -31,6 +32,7 @@ GCS_ERROR = -32001
 NOT_FOUND = -32002
 GAR_ERROR = -32003
 COMPUTE_ERROR = -32004
+K8S_ERROR = -32005
 
 
 class JsonRpcRequest(BaseModel):
@@ -101,6 +103,21 @@ class JsonRpcHandler:
             "sql_start_proxy": self._sql_start_proxy,
             "sql_stop_proxy": self._sql_stop_proxy,
             "sql_list_proxies": self._sql_list_proxies,
+            # K8s methods
+            "k8s_list_clusters": self._k8s_list_clusters,
+            "k8s_connect": self._k8s_connect,
+            "k8s_disconnect": self._k8s_disconnect,
+            "k8s_connection_status": self._k8s_connection_status,
+            "k8s_list_namespaces": self._k8s_list_namespaces,
+            "k8s_list_pods": self._k8s_list_pods,
+            "k8s_list_services": self._k8s_list_services,
+            "k8s_list_ingresses": self._k8s_list_ingresses,
+            "k8s_list_deployments": self._k8s_list_deployments,
+            "k8s_get_yaml": self._k8s_get_yaml,
+            "k8s_pod_logs": self._k8s_pod_logs,
+            "k8s_start_log_stream": self._k8s_start_log_stream,
+            "k8s_stop_log_stream": self._k8s_stop_log_stream,
+            "k8s_list_log_streams": self._k8s_list_log_streams,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
@@ -606,6 +623,193 @@ class JsonRpcHandler:
         manager = self._get_proxy_manager()
         proxies = manager.list_proxies()
         return {"proxies": proxies}
+
+    # --- K8s Method implementations ---
+
+    def _get_k8s_client(self) -> K8sClient:
+        """Get the K8s client instance."""
+        return get_k8s_client()
+
+    def _get_log_streamer(self) -> K8sLogStreamer:
+        """Get the log streamer instance."""
+        return get_log_streamer(self._get_k8s_client())
+
+    def _k8s_list_clusters(self, params: dict) -> dict:
+        """List GKE clusters."""
+        location = params.get("location", "-")
+        client = self._get_k8s_client()
+        clusters = client.list_clusters(location)
+        return {
+            "clusters": [c.to_dict() for c in clusters],
+            "count": len(clusters),
+        }
+
+    def _k8s_connect(self, params: dict) -> dict:
+        """Connect to a GKE cluster."""
+        cluster = params.get("cluster")
+        location = params.get("location")
+        
+        if not cluster or not location:
+            raise TypeError("Missing required parameters: cluster, location")
+        
+        client = self._get_k8s_client()
+        client.connect(cluster, location)
+        return {
+            "connected": True,
+            "cluster": client.connected_cluster,
+        }
+
+    def _k8s_disconnect(self, params: dict) -> dict:
+        """Disconnect from current cluster."""
+        client = self._get_k8s_client()
+        # Stop all log streams first
+        self._get_log_streamer().stop_all()
+        client.disconnect()
+        return {"disconnected": True}
+
+    def _k8s_connection_status(self, params: dict) -> dict:
+        """Get current connection status."""
+        client = self._get_k8s_client()
+        return {
+            "connected": client.is_connected,
+            "cluster": client.connected_cluster,
+        }
+
+    def _k8s_list_namespaces(self, params: dict) -> dict:
+        """List namespaces."""
+        client = self._get_k8s_client()
+        namespaces = client.list_namespaces()
+        return {
+            "namespaces": [ns.to_dict() for ns in namespaces],
+            "count": len(namespaces),
+        }
+
+    def _k8s_list_pods(self, params: dict) -> dict:
+        """List pods."""
+        namespace = params.get("namespace", "")
+        label_selector = params.get("label_selector", "")
+        
+        client = self._get_k8s_client()
+        pods = client.list_pods(namespace, label_selector)
+        return {
+            "pods": [p.to_dict() for p in pods],
+            "count": len(pods),
+        }
+
+    def _k8s_list_services(self, params: dict) -> dict:
+        """List services."""
+        namespace = params.get("namespace", "")
+        
+        client = self._get_k8s_client()
+        services = client.list_services(namespace)
+        return {
+            "services": [s.to_dict() for s in services],
+            "count": len(services),
+        }
+
+    def _k8s_list_ingresses(self, params: dict) -> dict:
+        """List ingresses."""
+        namespace = params.get("namespace", "")
+        
+        client = self._get_k8s_client()
+        ingresses = client.list_ingresses(namespace)
+        return {
+            "ingresses": [i.to_dict() for i in ingresses],
+            "count": len(ingresses),
+        }
+
+    def _k8s_list_deployments(self, params: dict) -> dict:
+        """List deployments."""
+        namespace = params.get("namespace", "")
+        
+        client = self._get_k8s_client()
+        deployments = client.list_deployments(namespace)
+        return {
+            "deployments": [d.to_dict() for d in deployments],
+            "count": len(deployments),
+        }
+
+    def _k8s_get_yaml(self, params: dict) -> dict:
+        """Get YAML representation of a resource."""
+        kind = params.get("kind")
+        name = params.get("name")
+        namespace = params.get("namespace", "default")
+        
+        if not kind or not name:
+            raise TypeError("Missing required parameters: kind, name")
+        
+        client = self._get_k8s_client()
+        yaml_content = client.get_resource_yaml(kind, name, namespace)
+        return {"yaml": yaml_content}
+
+    def _k8s_pod_logs(self, params: dict) -> dict:
+        """Get pod logs (non-streaming)."""
+        name = params.get("name")
+        namespace = params.get("namespace")
+        container = params.get("container")
+        tail_lines = params.get("tail_lines", 100)
+        
+        if not name or not namespace:
+            raise TypeError("Missing required parameters: name, namespace")
+        
+        client = self._get_k8s_client()
+        logs = client.get_pod_logs(name, namespace, container, tail_lines)
+        return {"logs": logs}
+
+    async def _k8s_start_log_stream(self, params: dict) -> dict:
+        """Start streaming logs via WebSocket."""
+        namespace = params.get("namespace", "")
+        label_selector = params.get("label_selector", "")
+        pod_name = params.get("pod_name", "")
+        container = params.get("container")
+        text_filter = params.get("text_filter", "")
+        tail_lines = params.get("tail_lines", 50)
+        
+        async def on_log(stream_id: str, pod: str, container: str, line: str):
+            await get_manager().broadcast({
+                "type": "k8s_log",
+                "data": {
+                    "stream_id": stream_id,
+                    "pod": pod,
+                    "container": container,
+                    "line": line,
+                }
+            })
+        
+        streamer = self._get_log_streamer()
+        stream_id = await streamer.start_stream(
+            namespace=namespace,
+            label_selector=label_selector,
+            pod_name=pod_name,
+            container=container,
+            text_filter=text_filter,
+            tail_lines=tail_lines,
+            on_log=on_log,
+        )
+        
+        # Broadcast stream started
+        await get_manager().broadcast({
+            "type": "k8s_log_stream_started",
+            "data": {"stream_id": stream_id}
+        })
+        
+        return {"stream_id": stream_id}
+
+    def _k8s_stop_log_stream(self, params: dict) -> dict:
+        """Stop a log stream."""
+        stream_id = params.get("stream_id")
+        if not stream_id:
+            raise TypeError("Missing parameter: stream_id")
+        
+        streamer = self._get_log_streamer()
+        success = streamer.stop_stream(stream_id)
+        return {"success": success}
+
+    def _k8s_list_log_streams(self, params: dict) -> dict:
+        """List active log streams."""
+        streamer = self._get_log_streamer()
+        streams = streamer.list_streams()
+        return {"streams": streams}
 
 
 # Singleton handler instance
