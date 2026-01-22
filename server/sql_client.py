@@ -60,6 +60,52 @@ class SQLClient:
             
         return users
 
+    def create_database(self, instance: str, name: str, charset: str, collation: str) -> dict[str, Any]:
+        """Create a new database."""
+        body = {
+            "name": name,
+            "charset": charset,
+            "collation": collation
+        }
+        try:
+            request = self._service.databases().insert(project=self._project, instance=instance, body=body)
+            return request.execute()
+        except Exception as e:
+            print(f"Error creating database: {e}")
+            raise e
+
+    def delete_database(self, instance: str, name: str) -> dict[str, Any]:
+        """Delete a database."""
+        try:
+            request = self._service.databases().delete(project=self._project, instance=instance, database=name)
+            return request.execute()
+        except Exception as e:
+            print(f"Error deleting database: {e}")
+            raise e
+
+    def create_user(self, instance: str, name: str, password: str, host: str = "%") -> dict[str, Any]:
+        """Create a new user."""
+        body = {
+            "name": name,
+            "password": password,
+            "host": host
+        }
+        try:
+            request = self._service.users().insert(project=self._project, instance=instance, body=body)
+            return request.execute()
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            raise e
+
+    def delete_user(self, instance: str, name: str, host: str = "%") -> dict[str, Any]:
+        """Delete a user."""
+        try:
+            request = self._service.users().delete(project=self._project, instance=instance, name=name, host=host)
+            return request.execute()
+        except Exception as e:
+            print(f"Error deleting user: {e}")
+            raise e
+
 # Singleton
 _sql_client: SQLClient | None = None
 

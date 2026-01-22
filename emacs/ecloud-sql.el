@@ -27,6 +27,11 @@
   "Face for RUNNABLE state."
   :group 'ecloud-sql)
 
+(defface ecloud-sql-state-stopped-face
+  '((t :inherit font-lock-comment-face))
+  "Face for STOPPED state."
+  :group 'ecloud-sql)
+
 ;;; Helper functions
 
 (defun ecloud-sql--format-state (state)
@@ -34,6 +39,8 @@
   (cond
    ((string= state "RUNNABLE")
     (propertize state 'face 'ecloud-sql-state-runnable-face))
+   ((string= state "STOPPED")
+    (propertize state 'face 'ecloud-sql-state-stopped-face))
    (t state)))
 
 (defun ecloud-sql--get-ip (ip-addresses type)
@@ -51,7 +58,13 @@
             (connection-name (plist-get inst :connectionName))
             (version (plist-get inst :databaseVersion))
             (region (plist-get inst :region))
-            (state (plist-get inst :state))
+            (raw-state (plist-get inst :state))
+            (settings (plist-get inst :settings))
+            (activation-policy (plist-get settings :activationPolicy))
+            (state (if (and (string= raw-state "RUNNABLE")
+                            (string= activation-policy "NEVER"))
+                       "STOPPED"
+                     raw-state))
             (ip-addresses (plist-get inst :ipAddresses))
             (public-ip (ecloud-sql--get-ip ip-addresses "PRIMARY"))
             (private-ip (ecloud-sql--get-ip ip-addresses "PRIVATE"))
@@ -145,6 +158,11 @@
       (ecloud-sql--update-proxy-local name nil)))))
 
 ;;; Actions
+
+(defun ecloud-sql-help ()
+  "Show help for ecloud-sql-mode."
+  (interactive)
+  (message "SQL Keys: [d]DBs [u]Users [+d]NewDB [Dd]DelDB [+u]NewUser [Du]DelUser [p]Proxy [r]Refresh [?]Help [q]Quit"))
 
 (defun ecloud-sql-show-databases ()
   "Show databases for the instance at point."
@@ -273,11 +291,13 @@ Prompts for a port (leave empty for random port)."
   "Create a new user in the current instance."
   (interactive)
   (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name)))
+         (instance (plist-get inst :name))
+         (version (plist-get inst :databaseVersion)))
     (unless instance (user-error "No instance selected"))
-    (let ((name (read-string "Username: "))
-          (password (read-passwd "Password: "))
-          (host (read-string "Host (default %): " nil nil "%")))
+    (let* ((is-postgres (string-match-p "POSTGRES" version))
+           (name (read-string "Username: "))
+           (password (read-passwd "Password: "))
+           (host (if is-postgres nil (read-string "Host (default %): " nil nil "%"))))
       (when (and (not (string-empty-p name)) (not (string-empty-p password)))
         (message "Creating user %s..." name)
         (ecloud-rpc-sql-create-user-async 
@@ -291,11 +311,16 @@ Prompts for a port (leave empty for random port)."
   "Delete a user from the current instance."
   (interactive)
   (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name)))
+         (instance (plist-get inst :name))
+         (version (plist-get inst :databaseVersion)))
     (unless instance (user-error "No instance selected"))
-    (let ((name (read-string "Username to delete: "))
-          (host (read-string "Host (default %): " nil nil "%")))
-      (when (yes-or-no-p (format "Delete user %s@%s from %s? " name host instance))
+    (let* ((is-postgres (string-match-p "POSTGRES" version))
+           (name (read-string "Username to delete: "))
+           (host (if is-postgres nil (read-string "Host (default %): " nil nil "%"))))
+      (when (yes-or-no-p (format "Delete user %s%s from %s? " 
+                                 name 
+                                 (if host (format "@%s" host) "")
+                                 instance))
         (message "Deleting user %s..." name)
         (ecloud-rpc-sql-delete-user-async
          instance name host
@@ -324,6 +349,7 @@ Prompts for a port (leave empty for random port)."
   (define-key ecloud-sql-mode-map (kbd "D u") #'ecloud-sql-delete-user)
   (define-key ecloud-sql-mode-map (kbd "p") #'ecloud-sql-toggle-proxy)
   (define-key ecloud-sql-mode-map (kbd "r") #'ecloud-sql-refresh)
+  (define-key ecloud-sql-mode-map (kbd "?") #'ecloud-sql-help)
   (define-key ecloud-sql-mode-map (kbd "q") #'quit-window))
 
 (define-derived-mode ecloud-sql-mode tabulated-list-mode "ECloud-SQL"
@@ -348,6 +374,7 @@ Prompts for a port (leave empty for random port)."
     (kbd "D u") #'ecloud-sql-delete-user
     (kbd "p") #'ecloud-sql-toggle-proxy
     (kbd "r") #'ecloud-sql-refresh
+    (kbd "?") #'ecloud-sql-help
     (kbd "q") #'quit-window))
 
 ;;; Entry point
