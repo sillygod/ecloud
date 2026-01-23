@@ -75,7 +75,13 @@ class JsonRpcHandler:
             "download_object": self._download_object,
             "upload_object": self._upload_object,
             "delete_object": self._delete_object,
+            "batch_delete_objects": self._batch_delete_objects,
             "create_folder": self._create_folder,
+            "generate_presigned_url": self._generate_presigned_url,
+            "update_object_metadata": self._update_object_metadata,
+            "set_bucket_lifecycle": self._set_bucket_lifecycle,
+            "copy_object": self._copy_object,
+            "move_object": self._move_object,
             # GAR methods
             "gar_list_repos": self._gar_list_repos,
             "gar_list_locations": self._gar_list_locations,
@@ -92,6 +98,10 @@ class JsonRpcHandler:
             "compute_reserve_address": self._compute_reserve_address,
             "compute_list_regions": self._compute_list_regions,
             "compute_list_instances": self._compute_list_instances,
+            "compute_start_instance": self._compute_start_instance,
+            "compute_stop_instance": self._compute_stop_instance,
+            "compute_reset_instance": self._compute_reset_instance,
+            "compute_delete_instance": self._compute_delete_instance,
             # SQL methods
             "sql_list_instances": self._sql_list_instances,
             "sql_list_databases": self._sql_list_databases,
@@ -103,6 +113,11 @@ class JsonRpcHandler:
             "sql_start_proxy": self._sql_start_proxy,
             "sql_stop_proxy": self._sql_stop_proxy,
             "sql_list_proxies": self._sql_list_proxies,
+            "sql_list_backups": self._sql_list_backups,
+            "sql_create_backup": self._sql_create_backup,
+            "sql_delete_backup": self._sql_delete_backup,
+            "sql_restore_backup": self._sql_restore_backup,
+            "sql_get_connection_info": self._sql_get_connection_info,
             # K8s methods
             "k8s_list_clusters": self._k8s_list_clusters,
             "k8s_connect": self._k8s_connect,
@@ -113,6 +128,10 @@ class JsonRpcHandler:
             "k8s_list_services": self._k8s_list_services,
             "k8s_list_ingresses": self._k8s_list_ingresses,
             "k8s_list_deployments": self._k8s_list_deployments,
+            "k8s_scale_deployment": self._k8s_scale_deployment,
+            "k8s_pod_exec": self._k8s_pod_exec,
+            "k8s_apply_manifest": self._k8s_apply_manifest,
+            "k8s_resource_metrics": self._k8s_resource_metrics,
             "k8s_get_yaml": self._k8s_get_yaml,
             "k8s_pod_logs": self._k8s_pod_logs,
             "k8s_start_log_stream": self._k8s_start_log_stream,
@@ -340,6 +359,83 @@ class JsonRpcHandler:
         client = self._get_client()
         return client.create_folder(bucket, folder_path)
 
+    def _batch_delete_objects(self, params: dict) -> dict:
+        """Delete multiple objects."""
+        bucket = params.get("bucket")
+        object_paths = params.get("object_paths")
+        
+        if not bucket or not object_paths:
+            raise TypeError("Missing required parameters: bucket, object_paths")
+            
+        if not isinstance(object_paths, list):
+            raise TypeError("object_paths must be a list")
+            
+        client = self._get_client()
+        return client.batch_delete_objects(bucket, object_paths)
+
+    def _generate_presigned_url(self, params: dict) -> dict:
+        """Generate presigned URL."""
+        bucket = params.get("bucket")
+        object_path = params.get("object_path")
+        expiration = params.get("expiration", 3600)
+        method = params.get("method", "GET")
+        
+        if not bucket or not object_path:
+            raise TypeError("Missing required parameters: bucket, object_path")
+            
+        client = self._get_client()
+        url = client.generate_presigned_url(bucket, object_path, expiration, method)
+        return {"url": url}
+
+    def _update_object_metadata(self, params: dict) -> dict:
+        """Update object metadata."""
+        bucket = params.get("bucket")
+        object_path = params.get("object_path")
+        metadata = params.get("metadata")
+        
+        if not bucket or not object_path or metadata is None:
+            raise TypeError("Missing required parameters: bucket, object_path, metadata")
+            
+        client = self._get_client()
+        return client.update_object_metadata(bucket, object_path, metadata)
+
+    def _set_bucket_lifecycle(self, params: dict) -> dict:
+        """Set bucket lifecycle rules."""
+        bucket = params.get("bucket")
+        rules = params.get("rules")
+        
+        if not bucket or rules is None:
+            raise TypeError("Missing required parameters: bucket, rules")
+            
+        client = self._get_client()
+        return client.set_bucket_lifecycle(bucket, rules)
+
+    def _copy_object(self, params: dict) -> dict:
+        """Copy an object."""
+        source_bucket = params.get("source_bucket")
+        source_object = params.get("source_object")
+        dest_bucket = params.get("dest_bucket")
+        dest_object = params.get("dest_object")
+        
+        if not all([source_bucket, source_object, dest_bucket, dest_object]):
+            raise TypeError("Missing required parameters: source_bucket, source_object, dest_bucket, dest_object")
+            
+        client = self._get_client()
+        return client.copy_object(source_bucket, source_object, dest_bucket, dest_object)
+
+    def _move_object(self, params: dict) -> dict:
+        """Move an object."""
+        source_bucket = params.get("source_bucket")
+        source_object = params.get("source_object")
+        dest_bucket = params.get("dest_bucket")
+        dest_object = params.get("dest_object")
+        
+        if not all([source_bucket, source_object, dest_bucket, dest_object]):
+            raise TypeError("Missing required parameters: source_bucket, source_object, dest_bucket, dest_object")
+            
+        client = self._get_client()
+        return client.move_object(source_bucket, source_object, dest_bucket, dest_object)
+
     # --- GAR Method implementations ---
 
     def _gar_list_repos(self, params: dict) -> dict:
@@ -504,6 +600,42 @@ class JsonRpcHandler:
             "instances": [i.to_dict() for i in instances],
             "count": len(instances),
         }
+
+    def _compute_start_instance(self, params: dict) -> dict:
+        """Start a VM instance."""
+        zone = params.get("zone")
+        instance = params.get("instance")
+        if not zone or not instance:
+            raise TypeError("Missing required parameters: zone, instance")
+        client = self._get_compute_client()
+        return client.start_instance(zone, instance)
+
+    def _compute_stop_instance(self, params: dict) -> dict:
+        """Stop a VM instance."""
+        zone = params.get("zone")
+        instance = params.get("instance")
+        if not zone or not instance:
+            raise TypeError("Missing required parameters: zone, instance")
+        client = self._get_compute_client()
+        return client.stop_instance(zone, instance)
+
+    def _compute_reset_instance(self, params: dict) -> dict:
+        """Reset a VM instance."""
+        zone = params.get("zone")
+        instance = params.get("instance")
+        if not zone or not instance:
+            raise TypeError("Missing required parameters: zone, instance")
+        client = self._get_compute_client()
+        return client.reset_instance(zone, instance)
+
+    def _compute_delete_instance(self, params: dict) -> dict:
+        """Delete a VM instance."""
+        zone = params.get("zone")
+        instance = params.get("instance")
+        if not zone or not instance:
+            raise TypeError("Missing required parameters: zone, instance")
+        client = self._get_compute_client()
+        return client.delete_instance(zone, instance)
     
     def _get_config(self, params: dict) -> dict:
         """Get public server configuration."""
@@ -624,6 +756,52 @@ class JsonRpcHandler:
         proxies = manager.list_proxies()
         return {"proxies": proxies}
 
+    def _sql_list_backups(self, params: dict) -> dict:
+        """List backups for an instance."""
+        instance = params.get("instance")
+        if not instance:
+            raise TypeError("Missing parameter: instance")
+        client = self._get_sql_client()
+        return {"backups": client.list_backups(instance)}
+
+    async def _sql_create_backup(self, params: dict) -> dict:
+        """Create a backup."""
+        instance = params.get("instance")
+        description = params.get("description", "")
+        if not instance:
+            raise TypeError("Missing parameter: instance")
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.create_backup, instance, description)
+        return {"operation": result}
+
+    async def _sql_delete_backup(self, params: dict) -> dict:
+        """Delete a backup."""
+        instance = params.get("instance")
+        backup_id = params.get("backup_id")
+        if not instance or not backup_id:
+            raise TypeError("Missing parameters: instance, backup_id")
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.delete_backup, instance, backup_id)
+        return {"operation": result}
+
+    async def _sql_restore_backup(self, params: dict) -> dict:
+        """Restore a backup."""
+        instance = params.get("instance")
+        backup_id = params.get("backup_id")
+        if not instance or not backup_id:
+            raise TypeError("Missing parameters: instance, backup_id")
+        client = self._get_sql_client()
+        result = await asyncio.to_thread(client.restore_backup, instance, backup_id)
+        return {"operation": result}
+
+    def _sql_get_connection_info(self, params: dict) -> dict:
+        """Get connection info."""
+        instance = params.get("instance")
+        if not instance:
+            raise TypeError("Missing parameter: instance")
+        client = self._get_sql_client()
+        return client.get_connection_info(instance)
+
     # --- K8s Method implementations ---
 
     def _get_k8s_client(self) -> K8sClient:
@@ -728,6 +906,51 @@ class JsonRpcHandler:
             "deployments": [d.to_dict() for d in deployments],
             "count": len(deployments),
         }
+
+    def _k8s_scale_deployment(self, params: dict) -> dict:
+        """Scale a deployment."""
+        namespace = params.get("namespace")
+        name = params.get("name")
+        replicas = params.get("replicas")
+        
+        if not namespace or not name or replicas is None:
+            raise TypeError("Missing required parameters: namespace, name, replicas")
+        
+        client = self._get_k8s_client()
+        return client.scale_deployment(namespace, name, int(replicas))
+
+    def _k8s_pod_exec(self, params: dict) -> dict:
+        """Execute a command in a pod."""
+        namespace = params.get("namespace")
+        name = params.get("name")
+        command = params.get("command")
+        container = params.get("container")
+        
+        if not namespace or not name or not command:
+            raise TypeError("Missing required parameters: namespace, name, command")
+            
+        if isinstance(command, str):
+            command = [command]
+            
+        client = self._get_k8s_client()
+        output = client.pod_exec(namespace, name, command, container)
+        return {"output": output}
+
+    def _k8s_apply_manifest(self, params: dict) -> dict:
+        """Apply a Kubernetes manifest."""
+        namespace = params.get("namespace", "default")
+        manifest = params.get("manifest")
+        
+        if not manifest:
+            raise TypeError("Missing required parameter: manifest")
+            
+        client = self._get_k8s_client()
+        return client.apply_manifest(namespace, manifest)
+
+    def _k8s_resource_metrics(self, params: dict) -> dict:
+        """Get resource metrics."""
+        client = self._get_k8s_client()
+        return client.get_resource_metrics()
 
     def _k8s_get_yaml(self, params: dict) -> dict:
         """Get YAML representation of a resource."""

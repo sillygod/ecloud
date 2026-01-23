@@ -195,6 +195,52 @@ def _format_age(creation_timestamp) -> str:
         return f"{minutes}m"
 
 
+def _parse_quantity(quantity: str | int | float) -> float:
+    """Parse k8s quantity string to float base value.
+    
+    CPU: returns cores (e.g. 100m -> 0.1, 1 -> 1.0)
+    Memory: returns bytes (e.g. 1Ki -> 1024, 1Mi -> 1048576)
+    """
+    if isinstance(quantity, (int, float)):
+        return float(quantity)
+        
+    q = str(quantity)
+    if q.endswith('n'):
+        return float(q[:-1]) / 1_000_000_000
+    elif q.endswith('u'):
+        return float(q[:-1]) / 1_000_000
+    elif q.endswith('m'):
+        return float(q[:-1]) / 1_000
+    elif q.endswith('Ki'):
+        return float(q[:-2]) * 1024
+    elif q.endswith('Mi'):
+        return float(q[:-2]) * 1024**2
+    elif q.endswith('Gi'):
+        return float(q[:-2]) * 1024**3
+    elif q.endswith('Ti'):
+        return float(q[:-2]) * 1024**4
+    elif q.endswith('Pi'):
+        return float(q[:-2]) * 1024**5
+    elif q.endswith('Ei'):
+        return float(q[:-2]) * 1024**6
+    elif q.endswith('k'):
+        return float(q[:-1]) * 1000
+    elif q.endswith('M'):
+        return float(q[:-1]) * 1000**2
+    elif q.endswith('G'):
+        return float(q[:-1]) * 1000**3
+    elif q.endswith('T'):
+        return float(q[:-1]) * 1000**4
+    elif q.endswith('P'):
+        return float(q[:-1]) * 1000**5
+    elif q.endswith('E'):
+        return float(q[:-1]) * 1000**6
+        
+    try:
+        return float(q)
+    except ValueError:
+        return 0.0
+
 def auto_refresh_token(method):
     """Decorator to refresh token on 401 and retry once."""
     @wraps(method)
@@ -544,6 +590,183 @@ class K8sClient:
         resource_dict = resource.to_dict()
         # Clean up None values and empty dicts for cleaner YAML
         return yaml.dump(resource_dict, default_flow_style=False, allow_unicode=True)
+
+    @auto_refresh_token
+    def scale_deployment(self, namespace: str, name: str, replicas: int) -> dict:
+        """Scale a deployment."""
+        body = {"spec": {"replicas": replicas}}
+        self.apps_api.patch_namespaced_deployment_scale(name, namespace, body)
+        return {"success": True, "name": name, "replicas": replicas}
+
+    @auto_refresh_token
+    def pod_exec(self, namespace: str, name: str, command: list[str], container: str | None = None) -> str:
+        """Execute a command in a pod container."""
+        from kubernetes.stream import stream
+        
+        kwargs = {
+            "name": name,
+            "namespace": namespace,
+            "command": command,
+            "stderr": True,
+            "stdin": False,
+            "stdout": True,
+            "tty": False,
+        }
+        if container:
+            kwargs["container"] = container
+            
+        resp = stream(self.core_api.connect_get_namespaced_pod_exec, **kwargs)
+        return resp
+
+    @auto_refresh_token
+    def apply_manifest(self, namespace: str, manifest: str) -> dict:
+        """Apply a Kubernetes manifest (YAML)."""
+        # Parse YAML
+        try:
+            # list in case of multiple documents
+            objects = list(yaml.safe_load_all(manifest))
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}")
+            
+        results = []
+        for obj in objects:
+            if not obj:
+                continue
+                
+            kind = obj.get("kind")
+            metadata = obj.get("metadata", {})
+            name = metadata.get("name")
+            # Namespace in yaml overrides param, else use param
+            ns = metadata.get("namespace", namespace)
+            
+            if not kind or not name:
+                results.append({"error": "Missing kind or metadata.name", "object": obj})
+                continue
+
+            # This is a simplified apply strategy: Try Patch, if 404 then Create
+            # A proper apply would use Server-Side Apply or kubectl logic
+            
+            try:
+                # Try to map kind to API method
+                api_instance = None
+                create_method = None
+                patch_method = None
+                
+                # Determine API and methods based on Kind
+                # This is a partial mapping, can be expanded
+                if kind == "Deployment":
+                    api_instance = self.apps_api
+                    create_method = api_instance.create_namespaced_deployment
+                    patch_method = api_instance.patch_namespaced_deployment
+                elif kind == "Service":
+                    api_instance = self.core_api
+                    create_method = api_instance.create_namespaced_service
+                    patch_method = api_instance.patch_namespaced_service
+                elif kind == "Pod":
+                    api_instance = self.core_api
+                    create_method = api_instance.create_namespaced_pod
+                    patch_method = api_instance.patch_namespaced_pod
+                elif kind == "ConfigMap":
+                    api_instance = self.core_api
+                    create_method = api_instance.create_namespaced_config_map
+                    patch_method = api_instance.patch_namespaced_config_map
+                elif kind == "Secret":
+                    api_instance = self.core_api
+                    create_method = api_instance.create_namespaced_secret
+                    patch_method = api_instance.patch_namespaced_secret
+                elif kind == "Ingress":
+                    api_instance = self.networking_api
+                    create_method = api_instance.create_namespaced_ingress
+                    patch_method = api_instance.patch_namespaced_ingress
+                # Add more as needed...
+                
+                if api_instance:
+                    try:
+                        # Try patch first (update)
+                        patch_method(name, ns, obj)
+                        results.append({"name": name, "kind": kind, "action": "configured"})
+                    except ApiException as e:
+                        if e.status == 404:
+                            # Not found, create
+                            create_method(ns, obj)
+                            results.append({"name": name, "kind": kind, "action": "created"})
+                        else:
+                            raise e
+                else:
+                    # Fallback or error for unsupported kinds in this simple implementation
+                    # Alternatively, use dynamic client if available, but we use typed clients here.
+                    results.append({"name": name, "kind": kind, "error": "Unsupported kind for apply"})
+                    
+            except Exception as e:
+                results.append({"name": name, "kind": kind, "error": str(e)})
+                
+        return {"results": results}
+
+    @auto_refresh_token
+    def get_resource_metrics(self) -> dict:
+        """Get Pod and Node metrics with percentages."""
+        # Using CustomObjectsApi to access metrics.k8s.io
+        custom_api = k8s.CustomObjectsApi(self._api_client)
+        
+        metrics = {}
+        
+        try:
+            # 1. Fetch Node capacity/allocatable from CoreAPI
+            nodes_list = self.core_api.list_node().items
+            node_capacity = {}
+            for node in nodes_list:
+                allocatable = node.status.allocatable
+                name = node.metadata.name
+                node_capacity[name] = {
+                    "cpu": _parse_quantity(allocatable.get("cpu", "0")),
+                    "memory": _parse_quantity(allocatable.get("memory", "0"))
+                }
+
+            # 2. Fetch Node metrics
+            node_metrics = custom_api.list_cluster_custom_object(
+                group="metrics.k8s.io",
+                version="v1beta1",
+                plural="nodes"
+            )
+            
+            # 3. Augment metrics with percentages
+            nodes_result = []
+            for item in node_metrics.get("items", []):
+                name = item["metadata"]["name"]
+                usage = item["usage"]
+                
+                cpu_usage = _parse_quantity(usage.get("cpu", "0"))
+                mem_usage = _parse_quantity(usage.get("memory", "0"))
+                
+                capacity = node_capacity.get(name, {"cpu": 1.0, "memory": 1.0})
+                
+                cpu_percent = (cpu_usage / capacity["cpu"]) * 100 if capacity["cpu"] > 0 else 0
+                mem_percent = (mem_usage / capacity["memory"]) * 100 if capacity["memory"] > 0 else 0
+                
+                item["usage"]["cpu_percent"] = f"{cpu_percent:.1f}%"
+                item["usage"]["memory_percent"] = f"{mem_percent:.1f}%"
+                item["capacity"] = capacity # Optional: include capacity for client side calc
+                
+                nodes_result.append(item)
+                
+            metrics["nodes"] = nodes_result
+        except Exception as e:
+            metrics["nodes_error"] = str(e)
+            
+        try:
+            # Pod metrics (all namespaces)
+            # Note: Calculating Pod % is harder because we need requests/limits for each container 
+            # in each pod. For performance on large clusters, we skip per-pod % for now unless requested.
+            pod_metrics = custom_api.list_cluster_custom_object(
+                group="metrics.k8s.io",
+                version="v1beta1",
+                plural="pods"
+            )
+            metrics["pods"] = pod_metrics.get("items", [])
+        except Exception as e:
+            metrics["pods_error"] = str(e)
+            
+        return metrics
 
 
 # --- Singleton ---

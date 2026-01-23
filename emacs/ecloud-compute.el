@@ -197,10 +197,70 @@ If nil, checks the server configuration or defaults to user identity."
         (kill-new ip)
         (message "Copied: %s" ip)))))
 
+(defun ecloud-compute-start-instance ()
+  "Start the instance at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-entry))
+         (instance (tabulated-list-get-id))
+         (zone (substring-no-properties (aref entry 1))))
+    (when (yes-or-no-p (format "Start %s? " instance))
+      (message "Starting %s..." instance)
+      (ecloud-rpc-compute-start-instance-async
+       zone instance
+       (lambda (_resp)
+         (message "Start request sent for %s" instance)
+         (ecloud-compute-refresh))
+       (lambda (err) (message "Failed to start: %s" err))))))
+
+(defun ecloud-compute-stop-instance ()
+  "Stop the instance at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-entry))
+         (instance (tabulated-list-get-id))
+         (zone (substring-no-properties (aref entry 1))))
+    (when (yes-or-no-p (format "Stop %s? " instance))
+      (message "Stopping %s..." instance)
+      (ecloud-rpc-compute-stop-instance-async
+       zone instance
+       (lambda (_resp)
+         (message "Stop request sent for %s" instance)
+         (ecloud-compute-refresh))
+       (lambda (err) (message "Failed to stop: %s" err))))))
+
+(defun ecloud-compute-reset-instance ()
+  "Reset (hard restart) the instance at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-entry))
+         (instance (tabulated-list-get-id))
+         (zone (substring-no-properties (aref entry 1))))
+    (when (yes-or-no-p (format "Reset (hard restart) %s? " instance))
+      (message "Resetting %s..." instance)
+      (ecloud-rpc-compute-reset-instance-async
+       zone instance
+       (lambda (_resp)
+         (message "Reset request sent for %s" instance)
+         (ecloud-compute-refresh))
+       (lambda (err) (message "Failed to reset: %s" err))))))
+
+(defun ecloud-compute-delete-instance ()
+  "Delete the instance at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-entry))
+         (instance (tabulated-list-get-id))
+         (zone (substring-no-properties (aref entry 1))))
+    (when (yes-or-no-p (format "DELETE %s? This cannot be undone! " instance))
+      (message "Deleting %s..." instance)
+      (ecloud-rpc-compute-delete-instance-async
+       zone instance
+       (lambda (_resp)
+         (message "Delete request sent for %s" instance)
+         (ecloud-compute-refresh))
+       (lambda (err) (message "Failed to delete: %s" err))))))
+
 (defun ecloud-compute-help ()
   "Show help."
   (interactive)
-  (message "Keys: [RET/s]SSH [r]Refresh [c]CopyInternalIP [C]CopyExternalIP [w]CopyName [?]Help [q]Quit"))
+  (message "Keys: [RET/s]SSH [S]Start [T]Stop [!]Reset [D]Delete [r]Refresh [c]CopyInternalIP [C]CopyExternalIP [w]CopyName [?]Help [q]Quit"))
 
 ;;; Mode definition
 
@@ -211,6 +271,10 @@ If nil, checks the server configuration or defaults to user identity."
   (setq ecloud-compute-mode-map (make-sparse-keymap))
   (define-key ecloud-compute-mode-map (kbd "RET") #'ecloud-compute-ssh)
   (define-key ecloud-compute-mode-map (kbd "s") #'ecloud-compute-ssh)
+  (define-key ecloud-compute-mode-map (kbd "S") #'ecloud-compute-start-instance)
+  (define-key ecloud-compute-mode-map (kbd "T") #'ecloud-compute-stop-instance)
+  (define-key ecloud-compute-mode-map (kbd "!") #'ecloud-compute-reset-instance)
+  (define-key ecloud-compute-mode-map (kbd "D") #'ecloud-compute-delete-instance)
   (define-key ecloud-compute-mode-map (kbd "r") #'ecloud-compute-refresh)
   (define-key ecloud-compute-mode-map (kbd "c") #'ecloud-compute-copy-internal-ip)
   (define-key ecloud-compute-mode-map (kbd "C") #'ecloud-compute-copy-external-ip)
@@ -238,6 +302,10 @@ If nil, checks the server configuration or defaults to user identity."
   (evil-define-key 'motion ecloud-compute-mode-map
     (kbd "RET") #'ecloud-compute-ssh
     (kbd "s")   #'ecloud-compute-ssh
+    (kbd "S")   #'ecloud-compute-start-instance
+    (kbd "T")   #'ecloud-compute-stop-instance
+    (kbd "!")   #'ecloud-compute-reset-instance
+    (kbd "D")   #'ecloud-compute-delete-instance
     (kbd "r")   #'ecloud-compute-refresh
     (kbd "c")   #'ecloud-compute-copy-internal-ip
     (kbd "C")   #'ecloud-compute-copy-external-ip

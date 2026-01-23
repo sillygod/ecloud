@@ -279,6 +279,102 @@ class ComputeClient:
             "region": region,
         }
 
+    def start_instance(self, zone: str, instance: str) -> dict:
+        """Start a VM instance.
+        
+        Args:
+            zone: Zone of the instance.
+            instance: Name of the instance.
+            
+        Returns:
+            Dict with operation status.
+        """
+        request = compute_v1.StartInstanceRequest(
+            project=self._project,
+            zone=zone,
+            instance=instance,
+        )
+        operation = self._instances_client.start(request=request)
+        _wait_for_operation(operation)
+        return {
+            "success": True,
+            "operation": "start",
+            "instance": instance,
+            "zone": zone
+        }
+
+    def stop_instance(self, zone: str, instance: str) -> dict:
+        """Stop a VM instance.
+        
+        Args:
+            zone: Zone of the instance.
+            instance: Name of the instance.
+            
+        Returns:
+            Dict with operation status.
+        """
+        request = compute_v1.StopInstanceRequest(
+            project=self._project,
+            zone=zone,
+            instance=instance,
+        )
+        operation = self._instances_client.stop(request=request)
+        _wait_for_operation(operation)
+        return {
+            "success": True,
+            "operation": "stop",
+            "instance": instance,
+            "zone": zone
+        }
+
+    def reset_instance(self, zone: str, instance: str) -> dict:
+        """Reset (hard restart) a VM instance.
+        
+        Args:
+            zone: Zone of the instance.
+            instance: Name of the instance.
+            
+        Returns:
+            Dict with operation status.
+        """
+        request = compute_v1.ResetInstanceRequest(
+            project=self._project,
+            zone=zone,
+            instance=instance,
+        )
+        operation = self._instances_client.reset(request=request)
+        _wait_for_operation(operation)
+        return {
+            "success": True,
+            "operation": "reset",
+            "instance": instance,
+            "zone": zone
+        }
+
+    def delete_instance(self, zone: str, instance: str) -> dict:
+        """Delete a VM instance.
+        
+        Args:
+            zone: Zone of the instance.
+            instance: Name of the instance.
+            
+        Returns:
+            Dict with operation status.
+        """
+        request = compute_v1.DeleteInstanceRequest(
+            project=self._project,
+            zone=zone,
+            instance=instance,
+        )
+        operation = self._instances_client.delete(request=request)
+        _wait_for_operation(operation)
+        return {
+            "success": True,
+            "operation": "delete",
+            "instance": instance,
+            "zone": zone
+        }
+
 
 # Singleton
 _compute_client: ComputeClient | None = None

@@ -114,10 +114,68 @@
 ;;; Mode definition
 
 
+(defun ecloud-browser-generate-presigned-url ()
+  "Generate a presigned URL for the object at point."
+  (interactive)
+  (unless ecloud-browser--current-bucket
+    (user-error "Enter a bucket first"))
+  (let* ((id (tabulated-list-get-id))
+         (entry (tabulated-list-get-entry)))
+    (when (and id entry)
+      (if (string-suffix-p "/" id)
+          (user-error "Cannot generate URL for a folder")
+        (let ((expiration (read-number "Expiration (seconds): " 3600)))
+          (message "Generating URL...")
+          (ecloud-rpc-generate-presigned-url-async
+           ecloud-browser--current-bucket id "GET" expiration
+           (lambda (resp)
+             (let ((url (plist-get resp :url)))
+               (kill-new url)
+               (message "Copied URL: %s" url)))
+           (lambda (err) (message "Error: %s" err))))))))
+
+(defun ecloud-browser-copy-object ()
+  "Copy object at point to a new location."
+  (interactive)
+  (unless ecloud-browser--current-bucket
+    (user-error "Enter a bucket first"))
+  (let* ((id (tabulated-list-get-id))
+         (entry (tabulated-list-get-entry)))
+    (when (and id entry)
+      (let* ((dest-bucket (read-string "Destination bucket: " ecloud-browser--current-bucket))
+             (dest-obj (read-string "Destination path: " id)))
+        (when (yes-or-no-p (format "Copy %s to gs://%s/%s? " id dest-bucket dest-obj))
+          (message "Copying...")
+          (ecloud-rpc-copy-object-async
+           ecloud-browser--current-bucket id dest-bucket dest-obj
+           (lambda (_resp)
+             (message "Copied %s to gs://%s/%s" id dest-bucket dest-obj)
+             (ecloud-browser-refresh))
+           (lambda (err) (message "Copy failed: %s" err))))))))
+
+(defun ecloud-browser-move-object ()
+  "Move (rename) object at point."
+  (interactive)
+  (unless ecloud-browser--current-bucket
+    (user-error "Enter a bucket first"))
+  (let* ((id (tabulated-list-get-id))
+         (entry (tabulated-list-get-entry)))
+    (when (and id entry)
+      (let* ((dest-bucket (read-string "Destination bucket: " ecloud-browser--current-bucket))
+             (dest-obj (read-string "Destination path: " id)))
+        (when (yes-or-no-p (format "Move %s to gs://%s/%s? " id dest-bucket dest-obj))
+          (message "Moving...")
+          (ecloud-rpc-move-object-async
+           ecloud-browser--current-bucket id dest-bucket dest-obj
+           (lambda (_resp)
+             (message "Moved %s to gs://%s/%s" id dest-bucket dest-obj)
+             (ecloud-browser-refresh))
+           (lambda (err) (message "Move failed: %s" err))))))))
+
 (defun ecloud-browser-help ()
   "Show help for ecloud-browser-mode."
   (interactive)
-  (message "GCS Keys: [RET]Enter [^]Up [r]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [?]Help [q]Quit"))
+  (message "GCS Keys: [RET]Enter [^]Up [r]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [C]CopyObj [R]MoveObj [l]Link [?]Help [q]Quit"))
 
 (defvar ecloud-browser-mode-map nil
   "Keymap for `ecloud-browser-mode'.")
@@ -132,6 +190,9 @@
   (define-key ecloud-browser-mode-map (kbd "D") #'ecloud-browser-delete)
   (define-key ecloud-browser-mode-map (kbd "+") #'ecloud-browser-create-folder)
   (define-key ecloud-browser-mode-map (kbd "c") #'ecloud-browser-copy-path)
+  (define-key ecloud-browser-mode-map (kbd "C") #'ecloud-browser-copy-object)
+  (define-key ecloud-browser-mode-map (kbd "R") #'ecloud-browser-move-object)
+  (define-key ecloud-browser-mode-map (kbd "l") #'ecloud-browser-generate-presigned-url)
   (define-key ecloud-browser-mode-map (kbd "?") #'ecloud-browser-help)
   (define-key ecloud-browser-mode-map (kbd "q") #'quit-window))
 
@@ -397,6 +458,9 @@
     (kbd "D")   #'ecloud-browser-delete
     (kbd "+")   #'ecloud-browser-create-folder
     (kbd "c")   #'ecloud-browser-copy-path
+    (kbd "C")   #'ecloud-browser-copy-object
+    (kbd "R")   #'ecloud-browser-move-object
+    (kbd "l")   #'ecloud-browser-generate-presigned-url
     (kbd "?")   #'ecloud-browser-help
     (kbd "q")   #'quit-window))
 

@@ -159,183 +159,65 @@
 
 ;;; Actions
 
+(defun ecloud-sql-show-backups ()
+  "Show backups for the instance at point."
+  (interactive)
+  (let* ((inst (tabulated-list-get-id))
+         (name (plist-get inst :name)))
+    (unless name (user-error "No instance selected"))
+    (message "Fetching backups for %s..." name)
+    (let ((buffer (get-buffer-create (format "*ECloud-SQL-Backups: %s*" name))))
+      (with-current-buffer buffer (special-mode))
+      (pop-to-buffer buffer)
+      (ecloud-rpc-sql-list-backups-async
+       name
+       (lambda (resp)
+         (when (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (let ((inhibit-read-only t))
+               (erase-buffer)
+               (insert (format "Backups for %s:\n\n" name))
+               (dolist (bk (plist-get resp :backups))
+                 (insert (format "- ID: %s (Status: %s, End: %s)\n  Desc: %s\n"
+                                 (plist-get bk :id)
+                                 (plist-get bk :status)
+                                 (plist-get bk :endTime)
+                                 (or (plist-get bk :description) "Auto/None"))))
+               (insert "\n[Press 'q' to close]")))))
+       (lambda (err) (message "Failed to fetch backups: %s" err))))))
+
+(defun ecloud-sql-connection-info ()
+  "Show connection info for the instance at point."
+  (interactive)
+  (let* ((inst (tabulated-list-get-id))
+         (name (plist-get inst :name)))
+    (unless name (user-error "No instance selected"))
+    (message "Fetching info for %s..." name)
+    (ecloud-rpc-sql-get-connection-info-async
+     name
+     (lambda (resp)
+       (let ((buffer (get-buffer-create (format "*ECloud-SQL-Info: %s*" name))))
+         (with-current-buffer buffer
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (insert (format "Connection Info for %s:\n\n" name))
+             (insert (format "Connection Name: %s\n" (plist-get resp :connectionName)))
+             (insert (format "Public IP:       %s\n" (plist-get resp :publicIp)))
+             (insert (format "Private IP:      %s\n" (plist-get resp :privateIp)))
+             (insert (format "DB Version:      %s\n\n" (plist-get resp :databaseVersion)))
+             (insert "Connection Strings (Templates):\n")
+             (let ((uris (plist-get resp :connectionUris)))
+               (dolist (key (mapcar #'car (seq-partition uris 2))) ; Iterate plist keys
+                 (let ((val (plist-get uris key)))
+                   (insert (format "%s:\n  %s\n" key val)))))
+             (special-mode)))
+         (pop-to-buffer buffer)))
+     (lambda (err) (message "Failed to fetch info: %s" err)))))
+
 (defun ecloud-sql-help ()
   "Show help for ecloud-sql-mode."
   (interactive)
-  (message "SQL Keys: [d]DBs [u]Users [+d]NewDB [Dd]DelDB [+u]NewUser [Du]DelUser [p]Proxy [r]Refresh [?]Help [q]Quit"))
-
-(defun ecloud-sql-show-databases ()
-  "Show databases for the instance at point."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (name (plist-get inst :name)))
-    (unless name (user-error "No instance selected"))
-    (message "Fetching databases for %s..." name)
-    (let ((buffer (get-buffer-create (format "*ECloud-SQL-Databases: %s*" name))))
-      (with-current-buffer buffer (special-mode)) ;; Ensure mode is set
-      (pop-to-buffer buffer)
-      (ecloud-rpc-sql-list-databases-async 
-       name
-       (lambda (resp)
-         (when (buffer-live-p buffer)
-           (with-current-buffer buffer
-             (let ((inhibit-read-only t))
-               (erase-buffer)
-               (insert (format "Databases for %s:\n\n" name))
-               (dolist (db (plist-get resp :databases))
-                 (insert (format "- %s (Charset: %s, Collation: %s)\n"
-                                 (plist-get db :name)
-                                 (plist-get db :charset)
-                                 (plist-get db :collation))))
-               (message "Databases loaded for %s" name)))))
-       (lambda (err)
-         (message "Failed to fetch databases: %s" err))))))
-
-(defun ecloud-sql-show-users ()
-  "Show users for the instance at point."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (name (plist-get inst :name)))
-    (unless name (user-error "No instance selected"))
-    (message "Fetching users for %s..." name)
-    (let ((buffer (get-buffer-create (format "*ECloud-SQL-Users: %s*" name))))
-      (with-current-buffer buffer (special-mode)) ;; Ensure mode is set
-      (pop-to-buffer buffer) 
-      (ecloud-rpc-sql-list-users-async 
-       name
-       (lambda (resp)
-         (when (buffer-live-p buffer)
-           (with-current-buffer buffer
-             (let ((inhibit-read-only t))
-               (erase-buffer)
-               (insert (format "Users for %s:\n\n" name))
-               (dolist (user (plist-get resp :users))
-                 (insert (format "- %s (Host: %s, Type: %s)\n"
-                                 (plist-get user :name)
-                                 (plist-get user :host)
-                                 (plist-get user :type))))
-               (message "Users loaded for %s" name)))))
-       (lambda (err)
-         (message "Failed to fetch users: %s" err))))))
-
-(defun ecloud-sql-toggle-proxy ()
-  "Start or stop proxy for the instance at point.
-Prompts for a port (leave empty for random port)."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (connection-name (plist-get inst :connectionName))
-         (version (plist-get inst :databaseVersion))
-         (proxies-resp (ecloud-rpc-sql-list-proxies))
-         (proxies (plist-get proxies-resp :proxies))
-         (current-port (plist-get proxies (intern (concat ":" connection-name))))
-         (buffer (current-buffer)))
-
-    (if current-port
-        (progn
-          (message "Stopping proxy for %s..." connection-name)
-          (ecloud-rpc-sql-stop-proxy-async
-           connection-name
-           (lambda (_resp)
-             ;; Updates will come via WebSocket
-             (message "Proxy stopped for %s" connection-name))
-           (lambda (err)
-             (message "Failed to stop proxy: %s" err))))
-      (progn
-        (let* ((port-str (read-string "Port (default random): "))
-               (port (if (string= port-str "") nil (string-to-number port-str))))
-
-          (message "Starting proxy for %s..." connection-name)
-          (ecloud-rpc-sql-start-proxy-async
-           connection-name port version
-           (lambda (resp)
-             ;; Updates will come via WebSocket
-             (message "Proxy started on port %s" (plist-get resp :port)))
-           (lambda (err)
-             (message "Failed to start proxy: %s" err))))))))
-
-(defun ecloud-sql-create-database ()
-  "Create a new database in the current instance."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name)))
-    (unless instance (user-error "No instance selected"))
-    (let ((name (read-string "Database name: "))
-          (charset (read-string "Charset (default UTF8): " nil nil "UTF8"))
-          (collation (read-string "Collation (default en_US.UTF8): " nil nil "en_US.UTF8")))
-      (when (not (string-empty-p name))
-        (message "Creating database %s..." name)
-        (ecloud-rpc-sql-create-database-async 
-         instance name charset collation
-         (lambda (_resp)
-           (message "Database %s created" name))
-         (lambda (err)
-           (message "Failed to create database: %s" err)))))))
-
-(defun ecloud-sql-delete-database ()
-  "Delete a database from the current instance."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name)))
-    (unless instance (user-error "No instance selected"))
-    (let ((name (read-string "Database to delete: ")))
-      (when (yes-or-no-p (format "Delete database %s from %s? " name instance))
-        (message "Deleting database %s..." name)
-        (ecloud-rpc-sql-delete-database-async
-         instance name
-         (lambda (_resp)
-           (message "Database %s deleted" name))
-         (lambda (err)
-           (message "Failed to delete database: %s" err)))))))
-
-(defun ecloud-sql-create-user ()
-  "Create a new user in the current instance."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name))
-         (version (plist-get inst :databaseVersion)))
-    (unless instance (user-error "No instance selected"))
-    (let* ((is-postgres (string-match-p "POSTGRES" version))
-           (name (read-string "Username: "))
-           (password (read-passwd "Password: "))
-           (host (if is-postgres nil (read-string "Host (default %): " nil nil "%"))))
-      (when (and (not (string-empty-p name)) (not (string-empty-p password)))
-        (message "Creating user %s..." name)
-        (ecloud-rpc-sql-create-user-async 
-         instance name password host
-         (lambda (_resp)
-           (message "User %s created" name))
-         (lambda (err)
-           (message "Failed to create user: %s" err)))))))
-
-(defun ecloud-sql-delete-user ()
-  "Delete a user from the current instance."
-  (interactive)
-  (let* ((inst (tabulated-list-get-id))
-         (instance (plist-get inst :name))
-         (version (plist-get inst :databaseVersion)))
-    (unless instance (user-error "No instance selected"))
-    (let* ((is-postgres (string-match-p "POSTGRES" version))
-           (name (read-string "Username to delete: "))
-           (host (if is-postgres nil (read-string "Host (default %): " nil nil "%"))))
-      (when (yes-or-no-p (format "Delete user %s%s from %s? " 
-                                 name 
-                                 (if host (format "@%s" host) "")
-                                 instance))
-        (message "Deleting user %s..." name)
-        (ecloud-rpc-sql-delete-user-async
-         instance name host
-         (lambda (_resp)
-           (message "User %s deleted" name))
-         (lambda (err)
-           (message "Failed to delete user: %s" err)))))))
-
-(defun ecloud-sql-refresh ()
-  "Refresh the list."
-  (interactive)
-  (ecloud-sql--refresh-data)
-  (message "Refreshed"))
-
-;;; Mode definition
+  (message "SQL Keys: [d]DBs [u]Users [b]Backups [i]Info [+d]NewDB [Dd]DelDB [+u]NewUser [Du]DelUser [p]Proxy [r]Refresh [?]Help [q]Quit"))
 
 (defvar ecloud-sql-mode-map nil "Keymap for `ecloud-sql-mode'.")
 
@@ -343,6 +225,8 @@ Prompts for a port (leave empty for random port)."
   (setq ecloud-sql-mode-map (make-sparse-keymap))
   (define-key ecloud-sql-mode-map (kbd "d") #'ecloud-sql-show-databases)
   (define-key ecloud-sql-mode-map (kbd "u") #'ecloud-sql-show-users)
+  (define-key ecloud-sql-mode-map (kbd "b") #'ecloud-sql-show-backups)
+  (define-key ecloud-sql-mode-map (kbd "i") #'ecloud-sql-connection-info)
   (define-key ecloud-sql-mode-map (kbd "+ d") #'ecloud-sql-create-database)
   (define-key ecloud-sql-mode-map (kbd "D d") #'ecloud-sql-delete-database)
   (define-key ecloud-sql-mode-map (kbd "+ u") #'ecloud-sql-create-user)
@@ -351,6 +235,7 @@ Prompts for a port (leave empty for random port)."
   (define-key ecloud-sql-mode-map (kbd "r") #'ecloud-sql-refresh)
   (define-key ecloud-sql-mode-map (kbd "?") #'ecloud-sql-help)
   (define-key ecloud-sql-mode-map (kbd "q") #'quit-window))
+
 
 (define-derived-mode ecloud-sql-mode tabulated-list-mode "ECloud-SQL"
   "Major mode for browsing Cloud SQL instances.
@@ -368,6 +253,8 @@ Prompts for a port (leave empty for random port)."
   (evil-define-key 'motion ecloud-sql-mode-map
     (kbd "d") #'ecloud-sql-show-databases
     (kbd "u") #'ecloud-sql-show-users
+    (kbd "b") #'ecloud-sql-show-backups
+    (kbd "i") #'ecloud-sql-connection-info
     (kbd "+ d") #'ecloud-sql-create-database
     (kbd "D d") #'ecloud-sql-delete-database
     (kbd "+ u") #'ecloud-sql-create-user

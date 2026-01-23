@@ -261,6 +261,215 @@ class GCSClient:
             "bucket": bucket_name,
             "folder": folder_path,
         }
+    
+    def batch_delete_objects(self, bucket_name: str, object_paths: list[str]) -> dict:
+        """Delete multiple objects from GCS in a batch.
+        
+        Args:
+            bucket_name: Name of the bucket.
+            object_paths: List of object paths to delete.
+            
+        Returns:
+            Dict with deletion results.
+        """
+        bucket = self._client.bucket(bucket_name)
+        results = []
+        errors = []
+        
+        # GCS batch operations can be done via the batch context manager
+        # However, google-cloud-storage python client handles batching differently depending on version
+        # A simple iteration is often safer unless we need strict atomicity (which GCS batch doesn't guarantee anyway for deletes)
+        # But for performance on many objects, we should use the batch API if possible.
+        # The python client's batch() is for batching requests.
+        
+        try:
+            with self._client.batch():
+                for path in object_paths:
+                    blob = bucket.blob(path)
+                    blob.delete()
+                    results.append(path)
+        except Exception as e:
+            # If batch fails, we might not know which ones failed, but typically it raises on the first error 
+            # or collects errors. The batch context manager suppresses exceptions from individual requests 
+            # if they are 404s? actually no, delete() usually raises NotFound.
+            # Let's try to handle them safely.
+            pass
+
+        # Since batch handling of exceptions is tricky in the library, 
+        # let's iterate and capture errors for a more robust response, 
+        # or use batch only if we accept 'all or nothing' behavior or looking at the batch response.
+        # For simplicity and reliability in this agent context:
+        
+        success_count = 0
+        failed_objects = []
+        
+        # We will do it sequentially for now to return accurate status per object if needed, 
+        # or just simple try/except loop. 
+        # Actually, for "Batch operations" the user likely wants performance. 
+        # Let's use the batch context manager but catch individual errors if the library supports it,
+        # or just fallback to loop for better error reporting.
+        
+        for path in object_paths:
+            try:
+                bucket.blob(path).delete()
+                success_count += 1
+            except NotFound:
+                # Consider it success if it's already gone? Or report?
+                # Usually delete is idempotent-ish if we don't care it was missing.
+                success_count += 1 
+            except Exception as e:
+                failed_objects.append({"path": path, "error": str(e)})
+                
+        return {
+            "success": len(failed_objects) == 0,
+            "deleted_count": success_count,
+            "failed_objects": failed_objects,
+            "bucket": bucket_name
+        }
+
+    def generate_presigned_url(
+        self, 
+        bucket_name: str, 
+        object_path: str, 
+        expiration_seconds: int = 3600,
+        method: str = "GET"
+    ) -> str:
+        """Generate a presigned URL for an object.
+        
+        Args:
+            bucket_name: Name of the bucket.
+            object_path: Path to the object.
+            expiration_seconds: URL expiration time in seconds (default 1 hour).
+            method: HTTP method (GET, PUT, etc.).
+            
+        Returns:
+            Presigned URL string.
+        """
+        bucket = self._client.bucket(bucket_name)
+        blob = bucket.blob(object_path)
+        
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=expiration_seconds,
+            method=method,
+            service_account_email=None, # uses current credentials
+            access_token=None,
+        )
+        return url
+
+    def update_object_metadata(
+        self, 
+        bucket_name: str, 
+        object_path: str, 
+        metadata: dict
+    ) -> dict:
+        """Update custom metadata for an object.
+        
+        Args:
+            bucket_name: Name of the bucket.
+            object_path: Path to the object.
+            metadata: Dictionary of custom metadata keys and values.
+            
+        Returns:
+            Updated object info.
+        """
+        bucket = self._client.bucket(bucket_name)
+        blob = bucket.blob(object_path)
+        blob.reload()
+        
+        if blob.metadata is None:
+            blob.metadata = {}
+            
+        # Update metadata (merge)
+        for k, v in metadata.items():
+            blob.metadata[k] = v
+            
+        blob.patch()
+        
+        return {
+            "name": blob.name,
+            "metadata": blob.metadata,
+            "updated": blob.updated.isoformat() if blob.updated else ""
+        }
+
+    def set_bucket_lifecycle(self, bucket_name: str, rules: list[dict]) -> dict:
+        """Set lifecycle rules for a bucket.
+        
+        Args:
+            bucket_name: Name of the bucket.
+            rules: List of lifecycle rules. Each rule is a dict with 'action' and 'condition'.
+                   Example:
+                   [
+                       {
+                           "action": {"type": "Delete"},
+                           "condition": {"age": 30}
+                       }
+                   ]
+                   
+        Returns:
+            Updated bucket lifecycle configuration.
+        """
+        bucket = self._client.bucket(bucket_name)
+        bucket.lifecycle_rules = rules
+        bucket.patch()
+        
+        return {
+            "bucket": bucket_name,
+            "lifecycle_rules": list(bucket.lifecycle_rules)
+        }
+
+    def copy_object(
+        self,
+        source_bucket: str,
+        source_object: str,
+        dest_bucket: str,
+        dest_object: str
+    ) -> dict:
+        """Copy an object.
+        
+        Args:
+            source_bucket: Source bucket name.
+            source_object: Source object path.
+            dest_bucket: Destination bucket name.
+            dest_object: Destination object path.
+            
+        Returns:
+            Result of the copy operation.
+        """
+        s_bucket = self._client.bucket(source_bucket)
+        s_blob = s_bucket.blob(source_object)
+        
+        d_bucket = self._client.bucket(dest_bucket)
+        
+        new_blob = s_bucket.copy_blob(s_blob, d_bucket, dest_object)
+        
+        return {
+            "success": True,
+            "source": f"{source_bucket}/{source_object}",
+            "destination": f"{dest_bucket}/{dest_object}",
+            "size": new_blob.size
+        }
+
+    def move_object(
+        self,
+        source_bucket: str,
+        source_object: str,
+        dest_bucket: str,
+        dest_object: str
+    ) -> dict:
+        """Move an object (Copy + Delete)."""
+        # 1. Copy
+        copy_res = self.copy_object(source_bucket, source_object, dest_bucket, dest_object)
+        
+        # 2. Delete source
+        self.delete_object(source_bucket, source_object)
+        
+        return {
+            "success": True,
+            "operation": "move",
+            "source": f"{source_bucket}/{source_object}",
+            "destination": f"{dest_bucket}/{dest_object}"
+        }
 
 
 # Singleton instance

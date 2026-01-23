@@ -206,6 +206,53 @@ ERROR-CALLBACK is called with error message on failure."
                                   :folder_path folder-path)
                             error-callback))
 
+(defun ecloud-rpc-batch-delete-async (bucket object-paths callback &optional error-callback)
+  "Delete multiple OBJECT-PATHS from BUCKET asynchronously."
+  (ecloud-rpc-request-async "batch_delete_objects" callback
+                            (list :bucket bucket
+                                  :object_paths object-paths)
+                            error-callback))
+
+(defun ecloud-rpc-generate-presigned-url-async (bucket object-path method expiration callback &optional error-callback)
+  "Generate presigned URL asynchronously."
+  (let ((params (list :bucket bucket :object_path object-path)))
+    (when method (setq params (plist-put params :method method)))
+    (when expiration (setq params (plist-put params :expiration expiration)))
+    (ecloud-rpc-request-async "generate_presigned_url" callback params error-callback)))
+
+(defun ecloud-rpc-update-metadata-async (bucket object-path metadata callback &optional error-callback)
+  "Update metadata for OBJECT-PATH asynchronously."
+  (ecloud-rpc-request-async "update_object_metadata" callback
+                            (list :bucket bucket
+                                  :object_path object-path
+                                  :metadata metadata)
+                            error-callback))
+
+(defun ecloud-rpc-copy-object-async (source-bucket source-object dest-bucket dest-object callback &optional error-callback)
+  "Copy object asynchronously."
+  (ecloud-rpc-request-async "copy_object" callback
+                            (list :source_bucket source-bucket
+                                  :source_object source-object
+                                  :dest_bucket dest-bucket
+                                  :dest_object dest-object)
+                            error-callback))
+
+(defun ecloud-rpc-move-object-async (source-bucket source-object dest-bucket dest-object callback &optional error-callback)
+  "Move object asynchronously."
+  (ecloud-rpc-request-async "move_object" callback
+                            (list :source_bucket source-bucket
+                                  :source_object source-object
+                                  :dest_bucket dest-bucket
+                                  :dest_object dest-object)
+                            error-callback))
+
+(defun ecloud-rpc-set-lifecycle-async (bucket rules callback &optional error-callback)
+  "Set lifecycle RULES for BUCKET asynchronously."
+  (ecloud-rpc-request-async "set_bucket_lifecycle" callback
+                            (list :bucket bucket
+                                  :rules rules)
+                            error-callback))
+
 ;;; GAR Operations
 
 (defun ecloud-rpc-gar-list-locations ()
@@ -286,6 +333,30 @@ ERROR-CALLBACK is called with error message on failure."
   "List all VM instances."
   (ecloud-rpc-request "compute_list_instances" nil))
 
+(defun ecloud-rpc-compute-start-instance-async (zone instance callback &optional error-callback)
+  "Start VM instance asynchronously."
+  (ecloud-rpc-request-async "compute_start_instance" callback
+                            (list :zone zone :instance instance)
+                            error-callback))
+
+(defun ecloud-rpc-compute-stop-instance-async (zone instance callback &optional error-callback)
+  "Stop VM instance asynchronously."
+  (ecloud-rpc-request-async "compute_stop_instance" callback
+                            (list :zone zone :instance instance)
+                            error-callback))
+
+(defun ecloud-rpc-compute-reset-instance-async (zone instance callback &optional error-callback)
+  "Reset VM instance asynchronously."
+  (ecloud-rpc-request-async "compute_reset_instance" callback
+                            (list :zone zone :instance instance)
+                            error-callback))
+
+(defun ecloud-rpc-compute-delete-instance-async (zone instance callback &optional error-callback)
+  "Delete VM instance asynchronously."
+  (ecloud-rpc-request-async "compute_delete_instance" callback
+                            (list :zone zone :instance instance)
+                            error-callback))
+
 ;;; System
 
 (defun ecloud-rpc-get-config ()
@@ -316,6 +387,29 @@ ERROR-CALLBACK is called with error message on failure."
 (defun ecloud-rpc-sql-list-users (instance)
   "List users for INSTANCE."
   (ecloud-rpc-request "sql_list_users" (list :instance instance)))
+
+(defun ecloud-rpc-sql-list-backups-async (instance callback &optional error-callback)
+  "List backups for INSTANCE asynchronously."
+  (ecloud-rpc-request-async "sql_list_backups" callback (list :instance instance) error-callback))
+
+(defun ecloud-rpc-sql-create-backup-async (instance description callback &optional error-callback)
+  "Create backup for INSTANCE asynchronously."
+  (ecloud-rpc-request-async "sql_create_backup" callback 
+                            (list :instance instance :description description) error-callback))
+
+(defun ecloud-rpc-sql-delete-backup-async (instance backup-id callback &optional error-callback)
+  "Delete BACKUP-ID asynchronously."
+  (ecloud-rpc-request-async "sql_delete_backup" callback
+                            (list :instance instance :backup_id backup-id) error-callback))
+
+(defun ecloud-rpc-sql-restore-backup-async (instance backup-id callback &optional error-callback)
+  "Restore BACKUP-ID asynchronously."
+  (ecloud-rpc-request-async "sql_restore_backup" callback
+                            (list :instance instance :backup_id backup-id) error-callback))
+
+(defun ecloud-rpc-sql-get-connection-info-async (instance callback &optional error-callback)
+  "Get connection info asynchronously."
+  (ecloud-rpc-request-async "sql_get_connection_info" callback (list :instance instance) error-callback))
 
 (defun ecloud-rpc-sql-create-database (instance name &optional charset collation)
   "Create database NAME in INSTANCE."
@@ -525,6 +619,28 @@ Returns plist with :port."
 (defun ecloud-rpc-k8s-list-log-streams ()
   "List active log streams."
   (ecloud-rpc-request "k8s_list_log_streams" nil))
+
+(defun ecloud-rpc-k8s-scale-deployment-async (namespace name replicas callback &optional error-callback)
+  "Scale deployment asynchronously."
+  (ecloud-rpc-request-async "k8s_scale_deployment" callback
+                            (list :namespace namespace :name name :replicas replicas)
+                            error-callback))
+
+(defun ecloud-rpc-k8s-pod-exec (namespace name command &optional container)
+  "Execute command in pod. Returns output string."
+  (let ((params (list :namespace namespace :name name :command command)))
+    (when container (setq params (plist-put params :container container)))
+    (plist-get (ecloud-rpc-request "k8s_pod_exec" params) :output)))
+
+(defun ecloud-rpc-k8s-apply-manifest-async (manifest namespace callback &optional error-callback)
+  "Apply manifest asynchronously."
+  (ecloud-rpc-request-async "k8s_apply_manifest" callback
+                            (list :manifest manifest :namespace (or namespace "default"))
+                            error-callback))
+
+(defun ecloud-rpc-k8s-resource-metrics-async (callback &optional error-callback)
+  "Get resource metrics asynchronously."
+  (ecloud-rpc-request-async "k8s_resource_metrics" callback nil error-callback))
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

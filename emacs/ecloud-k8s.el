@@ -509,10 +509,104 @@
   (ecloud-k8s--fetch-clusters)
   (message "Disconnected"))
 
+(defun ecloud-k8s-scale-deployment ()
+  "Scale the deployment at point."
+  (interactive)
+  (unless (eq ecloud-k8s--current-view 'deployments)
+    (user-error "Scaling only available for deployments"))
+  (let* ((entry (tabulated-list-get-id))
+         (name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (when (and name namespace)
+      (let ((replicas (read-number "Replicas: ")))
+        (message "Scaling %s/%s to %d..." namespace name replicas)
+        (ecloud-k8s-scale-deployment-async
+         namespace name replicas
+         (lambda (_resp)
+           (message "Scale request sent.")
+           (ecloud-k8s-refresh))
+         (lambda (err) (message "Failed to scale: %s" err)))))))
+
+(defun ecloud-k8s-pod-exec ()
+  "Execute command in pod."
+  (interactive)
+  (unless (eq ecloud-k8s--current-view 'pods)
+    (user-error "Exec only available for pods"))
+  (let* ((entry (tabulated-list-get-id))
+         (name (plist-get entry :name))
+         (namespace (plist-get entry :namespace))
+         (containers (plist-get entry :containers))
+         (container (if (> (length containers) 1)
+                        (completing-read "Container: " containers nil t)
+                      (car containers)))
+         (cmd-str (read-string "Command: " "/bin/sh -c 'ls -la'")))
+    
+    (message "Executing in %s/%s..." name container)
+    ;; Exec is synchronous currently as it returns output directly
+    (let ((output (ecloud-rpc-k8s-pod-exec namespace name (split-string cmd-str) container)))
+      (if (string-empty-p output)
+          (message "Command executed (no output)")
+        (with-current-buffer (get-buffer-create "*ECloud-K8s-Exec*")
+          (erase-buffer)
+          (insert output)
+          (pop-to-buffer (current-buffer)))))))
+
+(defun ecloud-k8s-apply-manifest ()
+  "Apply a Kubernetes manifest."
+  (interactive)
+  (let ((manifest (read-string "Manifest (YAML): "))) ;; Simple read for now, ideally from region/buffer
+    (when (not (string-empty-p manifest))
+      (ecloud-k8s-apply-manifest-async
+       manifest nil
+       (lambda (resp)
+         (let ((results (plist-get resp :results)))
+           (message "Applied: %s" results)
+           (ecloud-k8s-refresh)))
+       (lambda (err) (message "Failed to apply: %s" err))))))
+
+(defun ecloud-k8s-show-metrics ()
+  "Show resource metrics."
+  (interactive)
+  (message "Fetching metrics...")
+  (ecloud-rpc-k8s-resource-metrics-async
+   (lambda (resp)
+     (let ((nodes (plist-get resp :nodes))
+           (pods (plist-get resp :pods))
+           (buffer (get-buffer-create "*ECloud-K8s-Metrics*")))
+       (with-current-buffer buffer
+         (let ((inhibit-read-only t))
+           (erase-buffer)
+           (insert "=== Node Metrics ===\n\n")
+           (dolist (n nodes)
+             (let* ((metadata (plist-get n :metadata))
+                    (usage (plist-get n :usage))
+                    (cpu-pct (plist-get usage :cpu_percent))
+                    (mem-pct (plist-get usage :memory_percent)))
+               (insert (format "Node: %s\n" (plist-get metadata :name)))
+               (insert (format "  CPU: %s (%s)\n" (plist-get usage :cpu) (or cpu-pct "?")))
+               (insert (format "  Mem: %s (%s)\n\n" (plist-get usage :memory) (or mem-pct "?")))))
+           (insert "\n=== Pod Metrics ===\n\n")
+           (dolist (p pods)
+             (let ((metadata (plist-get p :metadata))
+                   (containers (plist-get p :containers)))
+               (insert (format "Pod: %s/%s\n" 
+                               (plist-get metadata :namespace)
+                               (plist-get metadata :name)))
+               (dolist (c containers)
+                 (let ((usage (plist-get c :usage)))
+                   (insert (format "  Container: %s\n    CPU: %s\n    Mem: %s\n"
+                                   (plist-get c :name)
+                                   (plist-get usage :cpu)
+                                   (plist-get usage :memory)))))
+               (insert "\n"))))
+         (special-mode)
+         (pop-to-buffer buffer))))
+   (lambda (err) (message "Failed to fetch metrics: %s" err))))
+
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."
   (interactive)
-  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [n]Namespaces [N]Filter [y]YAML [l]Logs [L]Stream [r]Refresh [Q]Disconnect [?]Help"))
+  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [n]Namespaces [N]Filter [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
 
 ;;; Mode definitions
 
@@ -528,6 +622,10 @@
     (define-key map (kbd "y") #'ecloud-k8s-view-yaml)
     (define-key map (kbd "l") #'ecloud-k8s-view-logs)
     (define-key map (kbd "L") #'ecloud-k8s-stream-logs)
+    (define-key map (kbd "S") #'ecloud-k8s-scale-deployment)
+    (define-key map (kbd "e") #'ecloud-k8s-pod-exec)
+    (define-key map (kbd "A") #'ecloud-k8s-apply-manifest)
+    (define-key map (kbd "M") #'ecloud-k8s-show-metrics)
     (define-key map (kbd "r") #'ecloud-k8s-refresh)
     (define-key map (kbd "Q") #'ecloud-k8s-disconnect)
     (define-key map (kbd "?") #'ecloud-k8s-help)
@@ -558,6 +656,10 @@
     (kbd "y") #'ecloud-k8s-view-yaml
     (kbd "l") #'ecloud-k8s-view-logs
     (kbd "L") #'ecloud-k8s-stream-logs
+    (kbd "S") #'ecloud-k8s-scale-deployment
+    (kbd "e") #'ecloud-k8s-pod-exec
+    (kbd "A") #'ecloud-k8s-apply-manifest
+    (kbd "M") #'ecloud-k8s-show-metrics
     (kbd "r") #'ecloud-k8s-refresh
     (kbd "Q") #'ecloud-k8s-disconnect
     (kbd "?") #'ecloud-k8s-help
