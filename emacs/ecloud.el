@@ -47,6 +47,7 @@
 ;;; Code:
 
 (require 'ecloud-rpc)
+(require 'ecloud-notify)
 (require 'ecloud-browser)
 (require 'ecloud-commands)
 (require 'ecloud-gar)

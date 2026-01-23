@@ -10,6 +10,7 @@
 
 (require 'tabulated-list)
 (require 'ecloud-rpc)
+(require 'ecloud-notify)
 
 ;; Hook into WebSocket events for log streaming
 (defvar ecloud-k8s-log-hook nil
@@ -122,16 +123,16 @@
          (location (plist-get entry :location))
          (buffer (current-buffer)))
     (unless name (user-error "No cluster selected"))
-    (message "Connecting to %s..." name)
+    (ecloud-notify (format "Connecting to %s..." name))
     (ecloud-rpc-k8s-connect-async
      name location
      (lambda (resp)
        (when (buffer-live-p buffer)
          (with-current-buffer buffer
            (setq ecloud-k8s--current-cluster (plist-get resp :cluster))
-           (message "Connected to %s" name)
+           (ecloud-notify (format "Connected to %s" name))
            (ecloud-k8s--fetch-pods))))
-     (lambda (err) (message "Failed to connect: %s" err)))))
+     (lambda (err) (ecloud-notify (format "Failed to connect: %s" err) 5)))))
 
 ;;; Pods view
 
@@ -519,13 +520,13 @@
          (namespace (plist-get entry :namespace)))
     (when (and name namespace)
       (let ((replicas (read-number "Replicas: ")))
-        (message "Scaling %s/%s to %d..." namespace name replicas)
+        (ecloud-notify (format "Scaling %s/%s to %d..." namespace name replicas))
         (ecloud-k8s-scale-deployment-async
          namespace name replicas
          (lambda (_resp)
-           (message "Scale request sent.")
+           (ecloud-notify (format "Scale request sent."))
            (ecloud-k8s-refresh))
-         (lambda (err) (message "Failed to scale: %s" err)))))))
+         (lambda (err) (ecloud-notify (format "Failed to scale: %s" err) 5)))))))
 
 (defun ecloud-k8s-pod-exec ()
   "Execute command in pod."
@@ -541,11 +542,11 @@
                       (car containers)))
          (cmd-str (read-string "Command: " "/bin/sh -c 'ls -la'")))
     
-    (message "Executing in %s/%s..." name container)
+    (ecloud-notify (format "Executing in %s/%s..." name container))
     ;; Exec is synchronous currently as it returns output directly
     (let ((output (ecloud-rpc-k8s-pod-exec namespace name (split-string cmd-str) container)))
       (if (string-empty-p output)
-          (message "Command executed (no output)")
+          (ecloud-notify "Command executed (no output)")
         (with-current-buffer (get-buffer-create "*ECloud-K8s-Exec*")
           (erase-buffer)
           (insert output)
@@ -560,14 +561,14 @@
        manifest nil
        (lambda (resp)
          (let ((results (plist-get resp :results)))
-           (message "Applied: %s" results)
+           (ecloud-notify (format "Applied: %s" results))
            (ecloud-k8s-refresh)))
-       (lambda (err) (message "Failed to apply: %s" err))))))
+       (lambda (err) (ecloud-notify (format "Failed to apply: %s" err) 5))))))
 
 (defun ecloud-k8s-show-metrics ()
   "Show resource metrics."
   (interactive)
-  (message "Fetching metrics...")
+  (ecloud-notify "Fetching metrics...")
   (ecloud-rpc-k8s-resource-metrics-async
    (lambda (resp)
      (let ((nodes (plist-get resp :nodes))
@@ -601,7 +602,7 @@
                (insert "\n"))))
          (special-mode)
          (pop-to-buffer buffer))))
-   (lambda (err) (message "Failed to fetch metrics: %s" err))))
+   (lambda (err) (ecloud-notify (format "Failed to fetch metrics: %s" err) 5))))
 
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."

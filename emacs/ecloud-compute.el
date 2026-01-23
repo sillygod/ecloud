@@ -14,6 +14,7 @@
 
 (require 'tabulated-list)
 (require 'ecloud-rpc)
+(require 'ecloud-notify)
 
 ;;; Customization
 
@@ -177,7 +178,7 @@ If nil, checks the server configuration or defaults to user identity."
   (let ((id (tabulated-list-get-id)))
     (when id
       (kill-new id)
-      (message "Copied: %s" id))))
+      (ecloud-notify (format "Copied: %s" id)))))
 
 (defun ecloud-compute-copy-internal-ip ()
   "Copy internal IP."
@@ -186,7 +187,7 @@ If nil, checks the server configuration or defaults to user identity."
     (when entry
       (let ((ip (substring-no-properties (aref entry 3))))
         (kill-new ip)
-        (message "Copied: %s" ip)))))
+        (ecloud-notify (format "Copied: %s" ip))))))
 
 (defun ecloud-compute-copy-external-ip ()
   "Copy external IP."
@@ -195,7 +196,7 @@ If nil, checks the server configuration or defaults to user identity."
     (when entry
       (let ((ip (substring-no-properties (aref entry 4))))
         (kill-new ip)
-        (message "Copied: %s" ip)))))
+        (ecloud-notify (format "Copied: %s" ip))))))
 
 (defun ecloud-compute-start-instance ()
   "Start the instance at point."
@@ -204,13 +205,13 @@ If nil, checks the server configuration or defaults to user identity."
          (instance (tabulated-list-get-id))
          (zone (substring-no-properties (aref entry 1))))
     (when (yes-or-no-p (format "Start %s? " instance))
-      (message "Starting %s..." instance)
+      (ecloud-notify (format "Starting %s..." instance))
       (ecloud-rpc-compute-start-instance-async
        zone instance
        (lambda (_resp)
-         (message "Start request sent for %s" instance)
+         (ecloud-notify (format "Start request sent for %s" instance))
          (ecloud-compute-refresh))
-       (lambda (err) (message "Failed to start: %s" err))))))
+       (lambda (err) (ecloud-notify (format "Failed to start: %s" err) 5))))))
 
 (defun ecloud-compute-stop-instance ()
   "Stop the instance at point."
@@ -219,13 +220,13 @@ If nil, checks the server configuration or defaults to user identity."
          (instance (tabulated-list-get-id))
          (zone (substring-no-properties (aref entry 1))))
     (when (yes-or-no-p (format "Stop %s? " instance))
-      (message "Stopping %s..." instance)
+      (ecloud-notify (format "Stopping %s..." instance))
       (ecloud-rpc-compute-stop-instance-async
        zone instance
        (lambda (_resp)
-         (message "Stop request sent for %s" instance)
+         (ecloud-notify (format "Stop request sent for %s" instance))
          (ecloud-compute-refresh))
-       (lambda (err) (message "Failed to stop: %s" err))))))
+       (lambda (err) (ecloud-notify (format "Failed to stop: %s" err) 5))))))
 
 (defun ecloud-compute-reset-instance ()
   "Reset (hard restart) the instance at point."
@@ -234,13 +235,13 @@ If nil, checks the server configuration or defaults to user identity."
          (instance (tabulated-list-get-id))
          (zone (substring-no-properties (aref entry 1))))
     (when (yes-or-no-p (format "Reset (hard restart) %s? " instance))
-      (message "Resetting %s..." instance)
+      (ecloud-notify (format "Resetting %s..." instance))
       (ecloud-rpc-compute-reset-instance-async
        zone instance
        (lambda (_resp)
-         (message "Reset request sent for %s" instance)
+         (ecloud-notify (format "Reset request sent for %s" instance))
          (ecloud-compute-refresh))
-       (lambda (err) (message "Failed to reset: %s" err))))))
+       (lambda (err) (ecloud-notify (format "Failed to reset: %s" err) 5))))))
 
 (defun ecloud-compute-delete-instance ()
   "Delete the instance at point."
@@ -249,13 +250,13 @@ If nil, checks the server configuration or defaults to user identity."
          (instance (tabulated-list-get-id))
          (zone (substring-no-properties (aref entry 1))))
     (when (yes-or-no-p (format "DELETE %s? This cannot be undone! " instance))
-      (message "Deleting %s..." instance)
+      (ecloud-notify (format "Deleting %s..." instance))
       (ecloud-rpc-compute-delete-instance-async
        zone instance
        (lambda (_resp)
-         (message "Delete request sent for %s" instance)
+         (ecloud-notify (format "Delete request sent for %s" instance))
          (ecloud-compute-refresh))
-       (lambda (err) (message "Failed to delete: %s" err))))))
+       (lambda (err) (ecloud-notify (format "Failed to delete: %s" err) 5))))))
 
 (defun ecloud-compute-help ()
   "Show help."

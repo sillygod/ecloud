@@ -13,6 +13,7 @@
 
 (require 'tabulated-list)
 (require 'ecloud-rpc)
+(require 'ecloud-notify)
 
 ;; Hooking into ecloud-ws events if available
 (defvar ecloud-gcs-event-hook nil)
@@ -87,16 +88,16 @@
 
     (cond
      ((string= type "gcs_download_started")
-      (message "Started downloading gs://%s/%s..." bucket object-path))
+      (ecloud-notify (format "Started downloading gs://%s/%s..." bucket object-path)))
 
      ((string= type "gcs_download_finished")
-      (message "Finished downloading gs://%s/%s" bucket object-path))
+      (ecloud-notify (format "Finished downloading gs://%s/%s" bucket object-path)))
 
      ((string= type "gcs_upload_started")
-      (message "Started uploading to gs://%s/%s..." bucket object-path))
+      (ecloud-notify (format "Started uploading to gs://%s/%s..." bucket object-path)))
 
      ((string= type "gcs_upload_finished")
-      (message "Finished uploading to gs://%s/%s" bucket object-path)
+      (ecloud-notify (format "Finished uploading to gs://%s/%s" bucket object-path))
       ;; Refresh if we are in this bucket
       (when (and (string= bucket ecloud-browser--current-bucket)
                  (get-buffer "*ECloud*"))
@@ -104,7 +105,7 @@
           (ecloud-browser--refresh-data))))
 
      ((string= type "gcs_delete_finished")
-      (message "Deleted gs://%s/%s" bucket object-path)
+      (ecloud-notify (format "Deleted gs://%s/%s" bucket object-path))
       ;; Refresh if we are in this bucket
       (when (and (string= bucket ecloud-browser--current-bucket)
                  (get-buffer "*ECloud*"))
@@ -125,14 +126,14 @@
       (if (string-suffix-p "/" id)
           (user-error "Cannot generate URL for a folder")
         (let ((expiration (read-number "Expiration (seconds): " 3600)))
-          (message "Generating URL...")
+          (ecloud-notify "Generating URL...")
           (ecloud-rpc-generate-presigned-url-async
            ecloud-browser--current-bucket id "GET" expiration
            (lambda (resp)
              (let ((url (plist-get resp :url)))
                (kill-new url)
-               (message "Copied URL: %s" url)))
-           (lambda (err) (message "Error: %s" err))))))))
+               (ecloud-notify (format "Copied URL: %s" url))))
+           (lambda (err) (ecloud-notify (format "Error: %s" err) 5))))))))
 
 (defun ecloud-browser-copy-object ()
   "Copy object at point to a new location."
@@ -145,13 +146,13 @@
       (let* ((dest-bucket (read-string "Destination bucket: " ecloud-browser--current-bucket))
              (dest-obj (read-string "Destination path: " id)))
         (when (yes-or-no-p (format "Copy %s to gs://%s/%s? " id dest-bucket dest-obj))
-          (message "Copying...")
+          (ecloud-notify "Copying...")
           (ecloud-rpc-copy-object-async
            ecloud-browser--current-bucket id dest-bucket dest-obj
            (lambda (_resp)
-             (message "Copied %s to gs://%s/%s" id dest-bucket dest-obj)
+             (ecloud-notify (format "Copied %s to gs://%s/%s" id dest-bucket dest-obj))
              (ecloud-browser-refresh))
-           (lambda (err) (message "Copy failed: %s" err))))))))
+           (lambda (err) (ecloud-notify (format "Copy failed: %s" err) 5))))))))
 
 (defun ecloud-browser-move-object ()
   "Move (rename) object at point."
@@ -164,13 +165,13 @@
       (let* ((dest-bucket (read-string "Destination bucket: " ecloud-browser--current-bucket))
              (dest-obj (read-string "Destination path: " id)))
         (when (yes-or-no-p (format "Move %s to gs://%s/%s? " id dest-bucket dest-obj))
-          (message "Moving...")
+          (ecloud-notify "Moving...")
           (ecloud-rpc-move-object-async
            ecloud-browser--current-bucket id dest-bucket dest-obj
            (lambda (_resp)
-             (message "Moved %s to gs://%s/%s" id dest-bucket dest-obj)
+             (ecloud-notify (format "Moved %s to gs://%s/%s" id dest-bucket dest-obj))
              (ecloud-browser-refresh))
-           (lambda (err) (message "Move failed: %s" err))))))))
+           (lambda (err) (ecloud-notify (format "Move failed: %s" err) 5))))))))
 
 (defun ecloud-browser-help ()
   "Show help for ecloud-browser-mode."
@@ -355,12 +356,12 @@
                            (expand-file-name filename default-dir)))))
           (when (file-directory-p local-path)
             (setq local-path (expand-file-name filename local-path)))
-          (message "Requesting download for %s..." filename)
+          (ecloud-notify (format "Requesting download for %s..." filename))
           (ecloud-rpc-download-async 
            ecloud-browser--current-bucket id local-path
            (lambda (_resp) nil) ;; Updates via WebSocket
            (lambda (err)
-             (message "Download request failed: %s" err))))))))
+             (ecloud-notify (format "Download failed: %s" err) 5))))))))
 
 (defun ecloud-browser-upload ()
   "Upload a file to the current location."
@@ -374,14 +375,12 @@
                                 filename
                                 ecloud-browser--current-bucket
                                 object-path))
-                                ecloud-browser--current-bucket
-                                object-path))
-      (message "Requesting upload for %s..." filename)
+      (ecloud-notify (format "Requesting upload for %s..." filename))
       (ecloud-rpc-upload-async
        ecloud-browser--current-bucket object-path local-path
        (lambda (_resp) nil) ;; Updates via WebSocket
        (lambda (err)
-         (message "Upload request failed: %s" err))))
+         (ecloud-notify (format "Upload failed: %s" err) 5))))))
 
 (defun ecloud-browser-delete ()
   "Delete the item at point."
@@ -393,14 +392,12 @@
          (name (aref entry 0)))
     (when (and id entry)
       (when (yes-or-no-p (format "Delete %s? " name))
-    (when (and id entry)
-      (when (yes-or-no-p (format "Delete %s? " name))
-        (message "Deleting %s..." name)
+        (ecloud-notify (format "Deleting %s..." name))
         (ecloud-rpc-delete-async
          ecloud-browser--current-bucket id
          (lambda (_resp) nil) ;; Updates via WebSocket
          (lambda (err)
-           (message "Delete request failed: %s" err)))))))))
+           (ecloud-notify (format "Delete failed: %s" err) 5)))))))
 
 (defun ecloud-browser-create-folder ()
   "Create a new folder in the current location."
@@ -410,14 +407,13 @@
   (let* ((name (read-string "Folder name: "))
          (folder-path (concat ecloud-browser--current-prefix name)))
     (when (and name (not (string-empty-p name)))
-    (when (and name (not (string-empty-p name)))
-      (message "Creating folder %s..." name)
+      (ecloud-notify (format "Creating folder %s..." name))
       (ecloud-rpc-create-folder-async
        ecloud-browser--current-bucket folder-path
        (lambda (_resp)
          (ecloud-browser-refresh)) ;; No WebSocket event for create_folder yet
        (lambda (err)
-         (message "Create folder failed: %s" err)))))))
+         (ecloud-notify (format "Create folder failed: %s" err) 5))))))
 
 (defun ecloud-browser-copy-path ()
   "Copy the GCS path of the item at point to kill ring."
@@ -428,7 +424,8 @@
                       (format "gs://%s/%s" ecloud-browser--current-bucket id)
                     (format "gs://%s" id))))
         (kill-new path)
-        (message "Copied: %s" path)))))
+        (ecloud-notify (format "Copied: %s" path))))))
+
 
 ;;; Entry point
 
