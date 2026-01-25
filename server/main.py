@@ -105,7 +105,13 @@ async def websocket_endpoint(websocket: WebSocket):
 async def shutdown_event():
     """Cleanup resources on shutdown."""
     from sql_proxy import get_proxy_manager
+    from helm_client import reset_helm_client
+    
+    # Cleanup SQL proxy
     await get_proxy_manager().shutdown()
+    
+    # Cleanup Helm client (removes temporary kubeconfig)
+    reset_helm_client()
 
 
 async def _handle_single_request(data: dict) -> JsonRpcResponse | None:

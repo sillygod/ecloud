@@ -755,5 +755,27 @@ Returns plist with :port."
     (when wait (setq params (plist-put params :wait wait)))
     (ecloud-rpc-request-async "helm_uninstall_release" callback params error-callback)))
 
+(defun ecloud-rpc-k8s-get-resources (kind &optional namespace all-namespaces)
+  "Get resources of KIND. NAMESPACE for filtering, ALL-NAMESPACES to list all."
+  (let ((params (list :kind kind)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (ecloud-rpc-request "k8s_get_resources" params)))
+
+(defun ecloud-rpc-k8s-get-resources-async (kind callback &optional namespace all-namespaces error-callback)
+  "Get resources of KIND asynchronously."
+  (let ((params (list :kind kind)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (ecloud-rpc-request-async "k8s_get_resources" callback params error-callback)))
+
+(defun ecloud-rpc-k8s-list-api-resources ()
+  "List all available API resources (like kubectl api-resources)."
+  (ecloud-rpc-request "k8s_list_api_resources" nil))
+
+(defun ecloud-rpc-k8s-list-api-resources-async (callback &optional error-callback)
+  "List all available API resources asynchronously."
+  (ecloud-rpc-request-async "k8s_list_api_resources" callback nil error-callback))
+
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

@@ -55,6 +55,7 @@
 (require 'ecloud-compute)
 (require 'ecloud-sql)
 (require 'ecloud-k8s)
+(require 'ecloud-ws)
 (require 'ecloud-transient)
 
 ;;; User customization
@@ -93,6 +94,14 @@
 ;;;###autoload
 (autoload 'ecloud-k8s-list "ecloud-k8s"
   "Open the ECloud Kubernetes browser." t)
+
+;;;###autoload
+(autoload 'ecloud-ws-connect "ecloud-ws"
+  "Connect to the ECloud WebSocket server." t)
+
+;;;###autoload
+(autoload 'ecloud-ws-disconnect "ecloud-ws"
+  "Disconnect from the ECloud WebSocket server." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

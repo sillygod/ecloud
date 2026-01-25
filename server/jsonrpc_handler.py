@@ -146,6 +146,8 @@ class JsonRpcHandler:
             "k8s_start_log_stream": self._k8s_start_log_stream,
             "k8s_stop_log_stream": self._k8s_stop_log_stream,
             "k8s_list_log_streams": self._k8s_list_log_streams,
+            "k8s_get_resources": self._k8s_get_resources,
+            "k8s_list_api_resources": self._k8s_list_api_resources,
             # Helm methods
             "helm_list_releases": self._helm_list_releases,
             "helm_get_release_details": self._helm_get_release_details,
@@ -993,6 +995,31 @@ class JsonRpcHandler:
         return {
             "deployments": [d.to_dict() for d in deployments],
             "count": len(deployments),
+        }
+    
+    def _k8s_get_resources(self, params: dict) -> dict:
+        """Get resources of any Kubernetes kind."""
+        kind = params.get("kind")
+        namespace = params.get("namespace")
+        all_namespaces = params.get("all_namespaces", False)
+        
+        if not kind:
+            raise TypeError("Missing required parameter: kind")
+        
+        client = self._get_k8s_client()
+        resources = client.get_resources(kind, namespace, all_namespaces)
+        return {
+            "resources": resources,
+            "count": len(resources),
+        }
+    
+    def _k8s_list_api_resources(self, params: dict) -> dict:
+        """List all available API resources (like kubectl api-resources)."""
+        client = self._get_k8s_client()
+        resources = client.list_api_resources()
+        return {
+            "resources": resources,
+            "count": len(resources),
         }
 
     def _k8s_scale_deployment(self, params: dict) -> dict:

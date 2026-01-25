@@ -316,6 +316,21 @@ class K8sClient:
         self._ensure_connected()
         return k8s.NetworkingV1Api(self._api_client)
     
+    @property
+    def batch_api(self) -> k8s.BatchV1Api:
+        self._ensure_connected()
+        return k8s.BatchV1Api(self._api_client)
+    
+    @property
+    def rbac_api(self) -> k8s.RbacAuthorizationV1Api:
+        self._ensure_connected()
+        return k8s.RbacAuthorizationV1Api(self._api_client)
+    
+    @property
+    def autoscaling_api(self) -> k8s.AutoscalingV2Api:
+        self._ensure_connected()
+        return k8s.AutoscalingV2Api(self._api_client)
+    
     # --- Cluster Operations ---
     
     def list_clusters(self, location: str = "-") -> list[ClusterInfo]:
@@ -407,6 +422,229 @@ class K8sClient:
             )
             for ns in items
         ]
+    
+    @auto_refresh_token
+    def list_api_resources(self) -> list[dict[str, Any]]:
+        """List all available API resources (like kubectl api-resources).
+        
+        Returns:
+            List of dicts with keys: name, namespaced, kind, apiGroup, apiVersion
+        """
+        resources = []
+        
+        try:
+            # Get API groups
+            api_groups = self._api_client.call_api(
+                '/apis', 'GET',
+                response_type='object',
+                auth_settings=['BearerToken']
+            )
+            
+            # Core API (v1)
+            core_api = self._api_client.call_api(
+                '/api/v1', 'GET',
+                response_type='object',
+                auth_settings=['BearerToken']
+            )
+            
+            if core_api and core_api[0]:
+                core_data = core_api[0]
+                if 'resources' in core_data:
+                    for resource in core_data['resources']:
+                        # Skip subresources (e.g., pods/log, pods/status)
+                        if '/' in resource.get('name', ''):
+                            continue
+                        resources.append({
+                            'name': resource.get('name', ''),
+                            'namespaced': resource.get('namespaced', False),
+                            'kind': resource.get('kind', ''),
+                            'apiGroup': '',
+                            'apiVersion': 'v1',
+                        })
+            
+            # Other API groups
+            if api_groups and api_groups[0] and 'groups' in api_groups[0]:
+                for group in api_groups[0]['groups']:
+                    group_name = group.get('name', '')
+                    # Use preferred version
+                    preferred_version = group.get('preferredVersion', {})
+                    version = preferred_version.get('version', '')
+                    
+                    if not version:
+                        continue
+                    
+                    # Get resources for this API group version
+                    try:
+                        group_api = self._api_client.call_api(
+                            f'/apis/{group_name}/{version}', 'GET',
+                            response_type='object',
+                            auth_settings=['BearerToken']
+                        )
+                        
+                        if group_api and group_api[0] and 'resources' in group_api[0]:
+                            for resource in group_api[0]['resources']:
+                                # Skip subresources
+                                if '/' in resource.get('name', ''):
+                                    continue
+                                resources.append({
+                                    'name': resource.get('name', ''),
+                                    'namespaced': resource.get('namespaced', False),
+                                    'kind': resource.get('kind', ''),
+                                    'apiGroup': group_name,
+                                    'apiVersion': version,
+                                })
+                    except Exception:
+                        # Skip groups that fail
+                        continue
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to list API resources: {e}")
+        
+        # Sort by name
+        resources.sort(key=lambda x: x['name'])
+        return resources
+    
+    @auto_refresh_token
+    def get_resources(self, kind: str, namespace: str | None = None, all_namespaces: bool = False) -> list[dict]:
+        """Get resources of any Kubernetes kind.
+        
+        Args:
+            kind: Resource kind (e.g., 'pods', 'deployments', 'statefulsets')
+            namespace: Specific namespace (optional)
+            all_namespaces: List from all namespaces
+            
+        Returns:
+            List of resource dicts with metadata and status_summary
+        """
+        kind_lower = kind.lower()
+        
+        # Map kind to API method
+        api_methods = {
+            # Core API
+            'pods': (self.core_api, 'list_namespaced_pod', 'list_pod_for_all_namespaces'),
+            'services': (self.core_api, 'list_namespaced_service', 'list_service_for_all_namespaces'),
+            'configmaps': (self.core_api, 'list_namespaced_config_map', 'list_config_map_for_all_namespaces'),
+            'secrets': (self.core_api, 'list_namespaced_secret', 'list_secret_for_all_namespaces'),
+            'persistentvolumes': (self.core_api, 'list_persistent_volume', None),
+            'persistentvolumeclaims': (self.core_api, 'list_namespaced_persistent_volume_claim', 'list_persistent_volume_claim_for_all_namespaces'),
+            'nodes': (self.core_api, 'list_node', None),
+            'namespaces': (self.core_api, 'list_namespace', None),
+            'events': (self.core_api, 'list_namespaced_event', 'list_event_for_all_namespaces'),
+            'serviceaccounts': (self.core_api, 'list_namespaced_service_account', 'list_service_account_for_all_namespaces'),
+            
+            # Apps API
+            'deployments': (self.apps_api, 'list_namespaced_deployment', 'list_deployment_for_all_namespaces'),
+            'statefulsets': (self.apps_api, 'list_namespaced_stateful_set', 'list_stateful_set_for_all_namespaces'),
+            'daemonsets': (self.apps_api, 'list_namespaced_daemon_set', 'list_daemon_set_for_all_namespaces'),
+            'replicasets': (self.apps_api, 'list_namespaced_replica_set', 'list_replica_set_for_all_namespaces'),
+            
+            # Batch API
+            'jobs': (self.batch_api, 'list_namespaced_job', 'list_job_for_all_namespaces'),
+            'cronjobs': (self.batch_api, 'list_namespaced_cron_job', 'list_cron_job_for_all_namespaces'),
+            
+            # Networking API
+            'ingresses': (self.networking_api, 'list_namespaced_ingress', 'list_ingress_for_all_namespaces'),
+            'networkpolicies': (self.networking_api, 'list_namespaced_network_policy', 'list_network_policy_for_all_namespaces'),
+            
+            # RBAC API
+            'roles': (self.rbac_api, 'list_namespaced_role', 'list_role_for_all_namespaces'),
+            'rolebindings': (self.rbac_api, 'list_namespaced_role_binding', 'list_role_binding_for_all_namespaces'),
+            'clusterroles': (self.rbac_api, 'list_cluster_role', None),
+            'clusterrolebindings': (self.rbac_api, 'list_cluster_role_binding', None),
+            
+            # Autoscaling API
+            'horizontalpodautoscalers': (self.autoscaling_api, 'list_namespaced_horizontal_pod_autoscaler', 'list_horizontal_pod_autoscaler_for_all_namespaces'),
+        }
+        
+        if kind_lower not in api_methods:
+            raise ValueError(f"Unsupported resource kind: {kind}. Use kubectl api-resources to see available kinds.")
+        
+        api, namespaced_method, all_ns_method = api_methods[kind_lower]
+        
+        # Determine which method to call
+        if all_namespaces and all_ns_method:
+            method = getattr(api, all_ns_method)
+            items = method().items
+        elif namespace and namespaced_method:
+            method = getattr(api, namespaced_method)
+            items = method(namespace).items
+        elif not namespace and not all_namespaces and namespaced_method:
+            # Default to 'default' namespace
+            method = getattr(api, namespaced_method)
+            items = method('default').items
+        else:
+            # Cluster-scoped resources
+            method = getattr(api, namespaced_method)
+            items = method().items
+        
+        # Convert to dict format
+        resources = []
+        for item in items:
+            metadata = item.metadata
+            resource = {
+                'metadata': {
+                    'name': metadata.name,
+                    'namespace': metadata.namespace,
+                    'creationTimestamp': metadata.creation_timestamp.isoformat() if metadata.creation_timestamp else None,
+                    'labels': metadata.labels or {},
+                    'annotations': metadata.annotations or {},
+                },
+                'status_summary': self._get_status_summary(item, kind_lower),
+            }
+            resources.append(resource)
+        
+        return resources
+    
+    def _get_status_summary(self, resource, kind: str) -> str:
+        """Get a summary status string for any resource."""
+        if kind == 'pods':
+            return self._pod_status(resource)
+        elif kind in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']:
+            if hasattr(resource, 'status') and resource.status:
+                if hasattr(resource.status, 'ready_replicas') and hasattr(resource.status, 'replicas'):
+                    ready = resource.status.ready_replicas or 0
+                    total = resource.status.replicas or 0
+                    return f"{ready}/{total}"
+                elif hasattr(resource.status, 'number_ready') and hasattr(resource.status, 'desired_number_scheduled'):
+                    ready = resource.status.number_ready or 0
+                    total = resource.status.desired_number_scheduled or 0
+                    return f"{ready}/{total}"
+            return "Unknown"
+        elif kind == 'services':
+            if hasattr(resource, 'spec') and resource.spec:
+                return resource.spec.type or "ClusterIP"
+            return "Unknown"
+        elif kind == 'ingresses':
+            if hasattr(resource, 'status') and resource.status and hasattr(resource.status, 'load_balancer'):
+                lb = resource.status.load_balancer
+                if lb and hasattr(lb, 'ingress') and lb.ingress:
+                    return lb.ingress[0].ip or lb.ingress[0].hostname or "Pending"
+            return "Pending"
+        elif kind == 'jobs':
+            if hasattr(resource, 'status') and resource.status:
+                succeeded = resource.status.succeeded or 0
+                failed = resource.status.failed or 0
+                if succeeded > 0:
+                    return "Complete"
+                elif failed > 0:
+                    return "Failed"
+                return "Running"
+            return "Unknown"
+        elif kind == 'cronjobs':
+            if hasattr(resource, 'spec') and resource.spec:
+                return f"Schedule: {resource.spec.schedule}"
+            return "Unknown"
+        else:
+            # Generic status
+            if hasattr(resource, 'status') and resource.status:
+                if hasattr(resource.status, 'phase'):
+                    return resource.status.phase
+                elif hasattr(resource.status, 'conditions') and resource.status.conditions:
+                    # Find Ready condition
+                    for cond in resource.status.conditions:
+                        if cond.type == 'Ready':
+                            return 'Ready' if cond.status == 'True' else 'NotReady'
+            return "Active"
     
     # --- Pod Operations ---
     

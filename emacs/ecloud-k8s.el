@@ -123,6 +123,18 @@ Parses structured error messages and displays them appropriately."
     (propertize status 'face 'ecloud-k8s-error-face))
    (t status)))
 
+(defun ecloud-k8s--format-age (creation-time)
+  "Format CREATION-TIME as a human-readable age string."
+  (let* ((created (date-to-time creation-time))
+         (now (current-time))
+         (diff (time-subtract now created))
+         (seconds (time-to-seconds diff)))
+    (cond
+     ((< seconds 60) (format "%ds" (floor seconds)))
+     ((< seconds 3600) (format "%dm" (floor (/ seconds 60))))
+     ((< seconds 86400) (format "%dh" (floor (/ seconds 3600))))
+     (t (format "%dd" (floor (/ seconds 86400)))))))
+
 ;;; Clusters view
 
 (defun ecloud-k8s--fetch-clusters ()
@@ -1045,10 +1057,78 @@ Parses structured error messages and displays them appropriately."
          (pop-to-buffer buffer))))
    (lambda (err) (ecloud-notify (format "Failed to fetch metrics: %s" err) 5))))
 
+(defun ecloud-k8s-view-kind ()
+  "View resources of a specific Kubernetes kind with completion.
+Fetches available kinds dynamically from the Kubernetes API."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster"))
+  
+  ;; Fetch API resources dynamically
+  (ecloud-notify "Fetching available resource kinds...")
+  (ecloud-rpc-k8s-list-api-resources-async
+   (lambda (resp)
+     (let* ((api-resources (plist-get resp :resources))
+            ;; Extract resource names and create completion list
+            (kind-names (mapcar (lambda (r) (plist-get r :name)) api-resources))
+            ;; Sort alphabetically
+            (sorted-kinds (sort kind-names #'string<))
+            ;; Prompt user to select a kind
+            (kind (completing-read "Kubernetes kind: " sorted-kinds nil t)))
+       (when (and kind (not (string-empty-p kind)))
+         (ecloud-notify (format "Fetching %s..." kind))
+         (ecloud-rpc-k8s-get-resources-async
+          kind
+          (lambda (resp)
+            (let ((resources (plist-get resp :resources))
+                  (buffer (get-buffer-create (format "*ECloud-K8s-%s*" (capitalize kind)))))
+              (with-current-buffer buffer
+                (ecloud-k8s-mode)
+                (setq ecloud-k8s--current-view 'custom-kind)
+                (setq-local ecloud-k8s--custom-kind kind)
+                
+                ;; Set up tabulated list format
+                (setq tabulated-list-format
+                      [("Name" 40 t)
+                       ("Namespace" 20 t)
+                       ("Age" 15 t)
+                       ("Status" 20 nil)])
+                (setq tabulated-list-padding 2)
+                (tabulated-list-init-header)
+                
+                ;; Populate entries
+                (setq tabulated-list-entries
+                      (mapcar
+                       (lambda (resource)
+                         (let* ((metadata (plist-get resource :metadata))
+                                (name (plist-get metadata :name))
+                                (namespace (or (plist-get metadata :namespace) "-"))
+                                (creation-time (plist-get metadata :creationTimestamp))
+                                (age (if creation-time
+                                         (ecloud-k8s--format-age creation-time)
+                                       "N/A"))
+                                (status (or (plist-get resource :status_summary) "N/A")))
+                           (list resource
+                                 (vector
+                                  (propertize name 'face 'ecloud-k8s-name-face)
+                                  (propertize namespace 'face 'ecloud-k8s-namespace-face)
+                                  age
+                                  status))))
+                       resources))
+                
+                (tabulated-list-print t)
+                (goto-char (point-min)))
+              (switch-to-buffer buffer)
+              (ecloud-notify (format "Found %d %s" (length resources) kind))))
+          ecloud-k8s--current-namespace
+          (not ecloud-k8s--current-namespace)
+          (lambda (err) (ecloud-k8s--display-error err (format "Failed to fetch %s" kind)))))))
+   (lambda (err) (ecloud-k8s--display-error err "Failed to fetch API resources"))))
+
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."
   (interactive)
-  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [n]Namespaces [N]Filter [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
+  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [k]Kind [N]Filter [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
 
 (defun ecloud-k8s-helm-help ()
   "Show help for ecloud-helm-list-mode."
@@ -1064,7 +1144,9 @@ Parses structured error messages and displays them appropriately."
     (define-key map (kbd "s") #'ecloud-k8s-switch-to-services)
     (define-key map (kbd "i") #'ecloud-k8s-switch-to-ingresses)
     (define-key map (kbd "d") #'ecloud-k8s-switch-to-deployments)
+    (define-key map (kbd "h") #'ecloud-k8s-helm-list)
     (define-key map (kbd "n") #'ecloud-k8s-switch-to-namespaces)
+    (define-key map (kbd "k") #'ecloud-k8s-view-kind)
     (define-key map (kbd "N") #'ecloud-k8s-select-namespace)
     (define-key map (kbd "y") #'ecloud-k8s-view-yaml)
     (define-key map (kbd "l") #'ecloud-k8s-view-logs)
@@ -1098,6 +1180,21 @@ Parses structured error messages and displays them appropriately."
     (kbd "s") #'ecloud-k8s-switch-to-services
     (kbd "i") #'ecloud-k8s-switch-to-ingresses
     (kbd "d") #'ecloud-k8s-switch-to-deployments
+    (kbd "h") #'ecloud-k8s-helm-list
+    (kbd "n") #'ecloud-k8s-switch-to-namespaces
+    (kbd "k") #'ecloud-k8s-view-kind
+    (kbd "N") #'ecloud-k8s-select-namespace
+    (kbd "y") #'ecloud-k8s-view-yaml
+    (kbd "l") #'ecloud-k8s-view-logs
+    (kbd "L") #'ecloud-k8s-stream-logs
+    (kbd "S") #'ecloud-k8s-scale-deployment
+    (kbd "e") #'ecloud-k8s-pod-exec
+    (kbd "A") #'ecloud-k8s-apply-manifest
+    (kbd "M") #'ecloud-k8s-show-metrics
+    (kbd "r") #'ecloud-k8s-refresh
+    (kbd "Q") #'ecloud-k8s-disconnect
+    (kbd "?") #'ecloud-k8s-help
+    (kbd "q") #'quit-window
     (kbd "n") #'ecloud-k8s-switch-to-namespaces
     (kbd "N") #'ecloud-k8s-select-namespace
     (kbd "y") #'ecloud-k8s-view-yaml

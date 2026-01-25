@@ -5,6 +5,7 @@ using Service Account authentication with pyhelm3 library.
 """
 
 import asyncio
+import atexit
 import json
 import os
 import subprocess
@@ -31,6 +32,31 @@ from error_handler import (
     auth_service_account_file_not_found_error,
     create_helm_error_from_exception,
 )
+
+
+# Track all temporary kubeconfig files for cleanup
+_temp_kubeconfigs = []
+
+
+def _cleanup_all_temp_kubeconfigs():
+    """Clean up all temporary kubeconfig files.
+    
+    This function is registered with atexit to ensure cleanup
+    even if the server crashes or is killed.
+    """
+    global _temp_kubeconfigs
+    for kubeconfig_path in _temp_kubeconfigs:
+        if os.path.exists(kubeconfig_path):
+            try:
+                os.unlink(kubeconfig_path)
+                print(f"[atexit] Cleaned up temporary kubeconfig: {kubeconfig_path}")
+            except Exception as e:
+                print(f"[atexit] Warning: Failed to clean up {kubeconfig_path}: {e}")
+    _temp_kubeconfigs.clear()
+
+
+# Register cleanup function to run on exit
+atexit.register(_cleanup_all_temp_kubeconfigs)
 
 
 # --- Data Transfer Objects ---
@@ -159,6 +185,8 @@ class HelmClient:
             FileNotFoundError: If Service Account file doesn't exist
             Exception: If pyhelm3 initialization fails
         """
+        global _temp_kubeconfigs
+        
         # Ensure Service Account environment variable is set
         sa_path = _get_sa_path()
         
@@ -215,6 +243,9 @@ class HelmClient:
                 yaml.dump(kubeconfig_content, f)
                 self._temp_kubeconfig = f.name
             
+            # Track this file for cleanup on exit
+            _temp_kubeconfigs.append(self._temp_kubeconfig)
+            
             print(f"Created temporary kubeconfig: {self._temp_kubeconfig}")
             
             # Initialize pyhelm3 client with temporary kubeconfig
@@ -227,6 +258,8 @@ class HelmClient:
             # Clean up temporary kubeconfig on failure
             if self._temp_kubeconfig and os.path.exists(self._temp_kubeconfig):
                 os.unlink(self._temp_kubeconfig)
+                if self._temp_kubeconfig in _temp_kubeconfigs:
+                    _temp_kubeconfigs.remove(self._temp_kubeconfig)
                 self._temp_kubeconfig = None
             
             raise Exception(
@@ -236,6 +269,8 @@ class HelmClient:
     
     def cleanup(self) -> None:
         """Clean up temporary resources."""
+        global _temp_kubeconfigs
+        
         if self._temp_kubeconfig and os.path.exists(self._temp_kubeconfig):
             try:
                 os.unlink(self._temp_kubeconfig)
@@ -243,6 +278,9 @@ class HelmClient:
             except Exception as e:
                 print(f"Warning: Failed to clean up temporary kubeconfig: {e}")
             finally:
+                # Remove from global tracking list
+                if self._temp_kubeconfig in _temp_kubeconfigs:
+                    _temp_kubeconfigs.remove(self._temp_kubeconfig)
                 self._temp_kubeconfig = None
         
         self._initialized = False
