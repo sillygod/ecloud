@@ -24,6 +24,13 @@
   "ECloud Kubernetes settings."
   :group 'ecloud)
 
+(defcustom ecloud-k8s-pod-fetch-limit 500
+  "Maximum number of pods to fetch at once.
+Set to 0 for no limit. For clusters with many pods (>1000),
+setting a limit improves performance significantly."
+  :type 'integer
+  :group 'ecloud-k8s)
+
 (defface ecloud-k8s-name-face
   '((t :inherit font-lock-function-name-face :weight bold))
   "Face for resource names."
@@ -54,7 +61,7 @@
 (defvar ecloud-k8s--current-view 'pods
   "Current view type: clusters, namespaces, pods, services, ingresses, deployments, helm-releases.")
 
-(defvar ecloud-k8s--current-namespace nil
+(defvar ecloud-k8s--current-namespace "default"
   "Current namespace filter. nil means all namespaces.")
 
 (defvar ecloud-k8s--current-cluster nil
@@ -206,29 +213,38 @@ Parses structured error messages and displays them appropriately."
   (setq tabulated-list-entries nil)
   (tabulated-list-init-header)
   (tabulated-list-print t)
-  (message "Fetching pods...")
-  (let ((buffer (current-buffer)))
+  (let ((limit ecloud-k8s-pod-fetch-limit))
+    (if (and limit (> limit 0))
+        (message "Fetching up to %d pods..." limit)
+      (message "Fetching pods...")))
+  (let ((buffer (current-buffer))
+        (start-time (current-time)))
     (ecloud-rpc-k8s-list-pods-async
      (lambda (resp)
-       (let ((pods (plist-get resp :pods)))
+       (let ((pods (plist-get resp :pods))
+             (elapsed (float-time (time-subtract (current-time) start-time))))
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (setq tabulated-list-entries
-                   (mapcar (lambda (p)
-                             (list p
-                                   (vector
-                                    (propertize (or (plist-get p :name) "???") 'face 'ecloud-k8s-name-face)
-                                    (propertize (or (plist-get p :namespace) "???") 'face 'ecloud-k8s-namespace-face)
-                                    (or (plist-get p :ready) "")
-                                    (ecloud-k8s--format-status (or (plist-get p :status) ""))
-                                    (format "%d" (or (plist-get p :restarts) 0))
-                                    (or (plist-get p :age) "")
-                                    (or (plist-get p :ip) ""))))
-                           pods))
+             ;; Use a more efficient approach for large lists
+             (let ((entries nil))
+               (dolist (p pods)
+                 (push (list p
+                             (vector
+                              (propertize (or (plist-get p :name) "???") 'face 'ecloud-k8s-name-face)
+                              (propertize (or (plist-get p :namespace) "???") 'face 'ecloud-k8s-namespace-face)
+                              (or (plist-get p :ready) "")
+                              (ecloud-k8s--format-status (or (plist-get p :status) ""))
+                              (format "%d" (or (plist-get p :restarts) 0))
+                              (or (plist-get p :age) "")
+                              (or (plist-get p :ip) "")))
+                       entries))
+               (setq tabulated-list-entries (nreverse entries)))
              (tabulated-list-print)
-             (message "Found %d pods." (length pods))))))
-     ecloud-k8s--current-namespace nil
-     (lambda (err) (message "Error: %s" err)))))
+             (message "Found %d pods in %.2fs." (length pods) elapsed)))))
+     ecloud-k8s--current-namespace 
+     nil  ; label-selector
+     (lambda (err) (message "Error: %s" err))
+     ecloud-k8s-pod-fetch-limit)))
 
 ;;; Services view
 
@@ -903,6 +919,30 @@ Parses structured error messages and displays them appropriately."
 
 ;;; Navigation
 
+(defun ecloud-k8s-set-pod-limit (limit)
+  "Set the pod fetch limit to LIMIT.
+When LIMIT is 0, fetch all pods (no limit).
+When LIMIT is positive, fetch up to that many pods."
+  (interactive "nPod fetch limit (0 for no limit): ")
+  (setq ecloud-k8s-pod-fetch-limit limit)
+  (message "Pod fetch limit set to %s" 
+           (if (zerop limit) "unlimited" (format "%d" limit)))
+  ;; Refresh if we're currently viewing pods
+  (when (eq ecloud-k8s--current-view 'pods)
+    (ecloud-k8s--fetch-pods)))
+
+(defun ecloud-k8s-toggle-pod-limit ()
+  "Toggle between limited (500) and unlimited (0) pod fetching."
+  (interactive)
+  (setq ecloud-k8s-pod-fetch-limit
+        (if (zerop ecloud-k8s-pod-fetch-limit) 500 0))
+  (message "Pod fetch limit: %s"
+           (if (zerop ecloud-k8s-pod-fetch-limit) "unlimited" 
+             (format "%d" ecloud-k8s-pod-fetch-limit)))
+  ;; Refresh if we're currently viewing pods
+  (when (eq ecloud-k8s--current-view 'pods)
+    (ecloud-k8s--fetch-pods)))
+
 (defun ecloud-k8s-switch-to-pods ()
   "Switch to pods view."
   (interactive)
@@ -1168,7 +1208,7 @@ Similar to kubectl api-resources output."
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."
   (interactive)
-  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [k]Kind [N]Filter [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
+  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [k]Kind [N]Filter [=]SetLimit [T]ToggleLimit [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
 
 (defun ecloud-k8s-helm-help ()
   "Show help for ecloud-helm-list-mode."
@@ -1188,6 +1228,8 @@ Similar to kubectl api-resources output."
     (define-key map (kbd "n") #'ecloud-k8s-switch-to-namespaces)
     (define-key map (kbd "k") #'ecloud-k8s-view-kind)
     (define-key map (kbd "N") #'ecloud-k8s-select-namespace)
+    (define-key map (kbd "=") #'ecloud-k8s-set-pod-limit)
+    (define-key map (kbd "T") #'ecloud-k8s-toggle-pod-limit)
     (define-key map (kbd "y") #'ecloud-k8s-view-yaml)
     (define-key map (kbd "l") #'ecloud-k8s-view-logs)
     (define-key map (kbd "L") #'ecloud-k8s-stream-logs)
@@ -1224,19 +1266,8 @@ Similar to kubectl api-resources output."
     (kbd "n") #'ecloud-k8s-switch-to-namespaces
     (kbd "k") #'ecloud-k8s-view-kind
     (kbd "N") #'ecloud-k8s-select-namespace
-    (kbd "y") #'ecloud-k8s-view-yaml
-    (kbd "l") #'ecloud-k8s-view-logs
-    (kbd "L") #'ecloud-k8s-stream-logs
-    (kbd "S") #'ecloud-k8s-scale-deployment
-    (kbd "e") #'ecloud-k8s-pod-exec
-    (kbd "A") #'ecloud-k8s-apply-manifest
-    (kbd "M") #'ecloud-k8s-show-metrics
-    (kbd "r") #'ecloud-k8s-refresh
-    (kbd "Q") #'ecloud-k8s-disconnect
-    (kbd "?") #'ecloud-k8s-help
-    (kbd "q") #'quit-window
-    (kbd "n") #'ecloud-k8s-switch-to-namespaces
-    (kbd "N") #'ecloud-k8s-select-namespace
+    (kbd "=") #'ecloud-k8s-set-pod-limit
+    (kbd "T") #'ecloud-k8s-toggle-pod-limit
     (kbd "y") #'ecloud-k8s-view-yaml
     (kbd "l") #'ecloud-k8s-view-logs
     (kbd "L") #'ecloud-k8s-stream-logs

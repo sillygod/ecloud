@@ -956,9 +956,11 @@ class JsonRpcHandler:
         """List pods."""
         namespace = params.get("namespace", "")
         label_selector = params.get("label_selector", "")
+        field_selector = params.get("field_selector", "")
+        limit = params.get("limit", 0)  # Add limit parameter
         
         client = self._get_k8s_client()
-        pods = client.list_pods(namespace, label_selector)
+        pods = client.list_pods(namespace, label_selector, limit, field_selector)
         return {
             "pods": [p.to_dict() for p in pods],
             "count": len(pods),

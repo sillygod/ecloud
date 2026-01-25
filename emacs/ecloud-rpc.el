@@ -550,11 +550,13 @@ Returns plist with :port."
     (when label-selector (setq params (plist-put params :label_selector label-selector)))
     (ecloud-rpc-request "k8s_list_pods" params)))
 
-(defun ecloud-rpc-k8s-list-pods-async (callback &optional namespace label-selector error-callback)
-  "List pods asynchronously."
+(defun ecloud-rpc-k8s-list-pods-async (callback &optional namespace label-selector error-callback limit)
+  "List pods asynchronously.
+LIMIT can be used to restrict the number of pods returned for performance."
   (let ((params nil))
     (when namespace (setq params (plist-put params :namespace namespace)))
     (when label-selector (setq params (plist-put params :label_selector label-selector)))
+    (when limit (setq params (plist-put params :limit limit)))
     (ecloud-rpc-request-async "k8s_list_pods" callback params error-callback)))
 
 (defun ecloud-rpc-k8s-list-services (&optional namespace)

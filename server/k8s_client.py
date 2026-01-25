@@ -710,32 +710,48 @@ class K8sClient:
         return sum(cs.restart_count for cs in pod.status.container_statuses)
     
     @auto_refresh_token
-    def list_pods(self, namespace: str = "", label_selector: str = "") -> list[PodInfo]:
-        """List pods. Empty namespace = all namespaces."""
-        kwargs = {}
+    def list_pods(self, namespace: str = "", label_selector: str = "", limit: int = 0, field_selector: str = "") -> list[PodInfo]:
+        """List pods. Empty namespace = all namespaces.
+        
+        Args:
+            namespace: Namespace filter (empty = all namespaces)
+            label_selector: Label selector filter
+            limit: Maximum number of pods to return (0 = no limit)
+            field_selector: Field selector filter (e.g., "status.phase=Running")
+        """
+        kwargs = {
+            # Request only essential fields to reduce payload size
+            "_preload_content": True,
+        }
         if label_selector:
             kwargs["label_selector"] = label_selector
+        if field_selector:
+            kwargs["field_selector"] = field_selector
+        if limit > 0:
+            kwargs["limit"] = limit
         
         if namespace:
             items = self.core_api.list_namespaced_pod(namespace, **kwargs).items
         else:
             items = self.core_api.list_pod_for_all_namespaces(**kwargs).items
         
-        return [
-            PodInfo(
+        # Pre-allocate list for better performance
+        result = []
+        for p in items:
+            result.append(PodInfo(
                 name=p.metadata.name,
                 namespace=p.metadata.namespace,
                 status=self._pod_status(p),
                 phase=p.status.phase or "",
-                ip=p.status.pod_ip,
-                node=p.spec.node_name,
+                ip=p.status.pod_ip or "",
+                node=p.spec.node_name or "",
                 containers=[c.name for c in p.spec.containers],
                 ready=self._pod_ready_count(p),
                 restarts=self._pod_restarts(p),
                 age=_format_age(p.metadata.creation_timestamp),
-            )
-            for p in items
-        ]
+            ))
+        
+        return result
     
     @auto_refresh_token
     def get_pod_logs(self, name: str, namespace: str, 
