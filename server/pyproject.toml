@@ -15,6 +15,7 @@ dependencies = [
     "google-cloud-container>=2.0.0",
     "kubernetes>=29.0.0",
     "PyYAML>=6.0.0",
+    "pyhelm3>=0.4.0",
 ]
 license = {text = "MIT"}
 authors = [

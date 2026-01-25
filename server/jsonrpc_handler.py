@@ -17,8 +17,16 @@ from sql_client import get_sql_client, SQLClient
 from sql_proxy import get_proxy_manager, SQLProxyManager
 from k8s_client import get_k8s_client, K8sClient
 from k8s_log_streamer import get_log_streamer, K8sLogStreamer
+from helm_client import get_helm_client, HelmClient, reset_helm_client
 from config import config
 from websocket_manager import get_manager
+from error_handler import (
+    StructuredError,
+    create_helm_error_from_exception,
+    classify_helm_error,
+    helm_not_initialized_error,
+    helm_operation_failed_error,
+)
 
 
 # JSON-RPC 2.0 Error Codes
@@ -33,6 +41,7 @@ NOT_FOUND = -32002
 GAR_ERROR = -32003
 COMPUTE_ERROR = -32004
 K8S_ERROR = -32005
+HELM_ERROR = -32006
 
 
 class JsonRpcRequest(BaseModel):
@@ -137,6 +146,17 @@ class JsonRpcHandler:
             "k8s_start_log_stream": self._k8s_start_log_stream,
             "k8s_stop_log_stream": self._k8s_stop_log_stream,
             "k8s_list_log_streams": self._k8s_list_log_streams,
+            # Helm methods
+            "helm_list_releases": self._helm_list_releases,
+            "helm_get_release_details": self._helm_get_release_details,
+            "helm_install_chart": self._helm_install_chart,
+            "helm_upgrade_release": self._helm_upgrade_release,
+            "helm_rollback_release": self._helm_rollback_release,
+            "helm_uninstall_release": self._helm_uninstall_release,
+            "helm_list_repositories": self._helm_list_repositories,
+            "helm_add_repository": self._helm_add_repository,
+            "helm_remove_repository": self._helm_remove_repository,
+            "helm_search_charts": self._helm_search_charts,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
@@ -188,18 +208,59 @@ class JsonRpcHandler:
                 ),
             )
         except Exception as e:
-            error_code = GCS_ERROR
-            if "ArtifactRegistry" in type(e).__name__ or "Docker" in str(e):
-                error_code = GAR_ERROR
-            elif "Compute" in type(e).__name__:
-                error_code = COMPUTE_ERROR
-                
+            # Determine error code based on exception type and message
+            error_code = INTERNAL_ERROR
+            error_msg = str(e)
+            error_data = {"type": type(e).__name__}
+            
+            # Check if this is a structured error (contains error type prefix)
+            if ":" in error_msg and any(err_type in error_msg for err_type in [
+                "Helm", "Auth", "K8s", "Invalid"
+            ]):
+                # Parse structured error format: "ErrorType: message"
+                parts = error_msg.split(":", 1)
+                if len(parts) == 2:
+                    error_type = parts[0].strip()
+                    error_message = parts[1].strip()
+                    
+                    # Extract suggestion if present
+                    suggestion = None
+                    if "\nSuggestion:" in error_message:
+                        msg_parts = error_message.split("\nSuggestion:", 1)
+                        error_message = msg_parts[0].strip()
+                        suggestion = msg_parts[1].strip()
+                    
+                    # Build structured error data
+                    error_data = {
+                        "type": error_type,
+                    }
+                    if suggestion:
+                        error_data["details"] = {"suggestion": suggestion}
+                    
+                    # Set appropriate error code
+                    if "Helm" in error_type:
+                        error_code = HELM_ERROR
+                    elif "K8s" in error_type:
+                        error_code = K8S_ERROR
+                    elif "Auth" in error_type:
+                        error_code = INTERNAL_ERROR
+                    
+                    error_msg = error_message
+            else:
+                # Legacy error handling for non-structured errors
+                if "ArtifactRegistry" in type(e).__name__ or "Docker" in error_msg:
+                    error_code = GAR_ERROR
+                elif "Compute" in type(e).__name__:
+                    error_code = COMPUTE_ERROR
+                elif "Helm" in type(e).__name__ or "helm" in error_msg.lower():
+                    error_code = HELM_ERROR
+                    
             return JsonRpcResponse(
                 id=request.id,
                 error=JsonRpcError(
                     code=error_code,
-                    message=str(e),
-                    data={"type": type(e).__name__},
+                    message=error_msg,
+                    data=error_data,
                 ),
             )
     
@@ -822,7 +883,7 @@ class JsonRpcHandler:
             "count": len(clusters),
         }
 
-    def _k8s_connect(self, params: dict) -> dict:
+    async def _k8s_connect(self, params: dict) -> dict:
         """Connect to a GKE cluster."""
         cluster = params.get("cluster")
         location = params.get("location")
@@ -832,6 +893,28 @@ class JsonRpcHandler:
         
         client = self._get_k8s_client()
         client.connect(cluster, location)
+        
+        # Initialize Helm client with the same cluster credentials
+        # This ensures Helm uses the same Service Account authentication as K8s
+        try:
+            credentials = client.get_cluster_credentials()
+            if credentials:
+                from helm_client import initialize_helm_client
+                await initialize_helm_client(
+                    cluster_endpoint=credentials["endpoint"],
+                    ca_cert_path=credentials["ca_cert_path"],
+                    token=credentials["token"]
+                )
+                print("Helm client initialized successfully with cluster credentials")
+            else:
+                print("Warning: Could not get cluster credentials for Helm client")
+        except Exception as e:
+            # Log the error but don't fail the K8s connection
+            # Helm functionality will be unavailable but K8s operations will still work
+            print(f"Warning: Failed to initialize Helm client: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        
         return {
             "connected": True,
             "cluster": client.connected_cluster,
@@ -843,6 +926,11 @@ class JsonRpcHandler:
         # Stop all log streams first
         self._get_log_streamer().stop_all()
         client.disconnect()
+        
+        # Reset Helm client when disconnecting from cluster
+        # This ensures Helm client will be re-initialized on next connection
+        reset_helm_client()
+        
         return {"disconnected": True}
 
     def _k8s_connection_status(self, params: dict) -> dict:
@@ -1033,6 +1121,215 @@ class JsonRpcHandler:
         streamer = self._get_log_streamer()
         streams = streamer.list_streams()
         return {"streams": streams}
+
+    # --- Helm Method implementations ---
+
+    def _get_helm_client(self) -> HelmClient:
+        """Get the Helm client instance."""
+        return get_helm_client()
+
+    async def _helm_list_releases(self, params: dict) -> dict:
+        """List Helm releases."""
+        namespace = params.get("namespace")
+        all_namespaces = params.get("all_namespaces", False)
+        
+        client = self._get_helm_client()
+        releases = await client.list_releases(namespace, all_namespaces)
+        return {
+            "releases": releases,
+            "count": len(releases),
+        }
+
+    async def _helm_get_release_details(self, params: dict) -> dict:
+        """Get detailed information about a Helm release."""
+        name = params.get("name")
+        namespace = params.get("namespace", "default")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        client = self._get_helm_client()
+        details = await client.get_release_details(name, namespace)
+        return {"release": details}
+
+    async def _helm_install_chart(self, params: dict) -> dict:
+        """Install a Helm chart."""
+        release_name = params.get("release_name")
+        chart_ref = params.get("chart_ref")
+        namespace = params.get("namespace", "default")
+        values = params.get("values")
+        repo = params.get("repo")
+        version = params.get("version")
+        create_namespace = params.get("create_namespace", False)
+        wait = params.get("wait", True)
+        timeout = params.get("timeout", 300)
+        
+        if not release_name or not chart_ref:
+            raise TypeError("Missing required parameters: release_name, chart_ref")
+        
+        client = self._get_helm_client()
+        result = await client.install_chart(
+            release_name=release_name,
+            chart_ref=chart_ref,
+            namespace=namespace,
+            values=values,
+            repo=repo,
+            version=version,
+            create_namespace=create_namespace,
+            wait=wait,
+            timeout=timeout
+        )
+        
+        # Broadcast installation finished
+        await get_manager().broadcast({
+            "type": "helm_install_finished",
+            "data": {"release_name": release_name, "namespace": namespace}
+        })
+        
+        return result
+
+    async def _helm_upgrade_release(self, params: dict) -> dict:
+        """Upgrade a Helm release."""
+        release_name = params.get("release_name")
+        chart_ref = params.get("chart_ref")
+        namespace = params.get("namespace", "default")
+        values = params.get("values")
+        version = params.get("version")
+        wait = params.get("wait", True)
+        timeout = params.get("timeout", 300)
+        
+        if not release_name:
+            raise TypeError("Missing required parameter: release_name")
+        
+        client = self._get_helm_client()
+        result = await client.upgrade_release(
+            release_name=release_name,
+            chart_ref=chart_ref,
+            namespace=namespace,
+            values=values,
+            version=version,
+            wait=wait,
+            timeout=timeout
+        )
+        
+        # Broadcast upgrade finished
+        await get_manager().broadcast({
+            "type": "helm_upgrade_finished",
+            "data": {"release_name": release_name, "namespace": namespace}
+        })
+        
+        return result
+
+    async def _helm_rollback_release(self, params: dict) -> dict:
+        """Rollback a Helm release to a specific revision."""
+        release_name = params.get("release_name")
+        revision = params.get("revision")
+        namespace = params.get("namespace", "default")
+        wait = params.get("wait", True)
+        
+        if not release_name or revision is None:
+            raise TypeError("Missing required parameters: release_name, revision")
+        
+        client = self._get_helm_client()
+        result = await client.rollback_release(
+            release_name=release_name,
+            revision=int(revision),
+            namespace=namespace,
+            wait=wait
+        )
+        
+        # Broadcast rollback finished
+        await get_manager().broadcast({
+            "type": "helm_rollback_finished",
+            "data": {"release_name": release_name, "namespace": namespace, "revision": revision}
+        })
+        
+        return result
+
+    async def _helm_uninstall_release(self, params: dict) -> dict:
+        """Uninstall a Helm release."""
+        release_name = params.get("release_name")
+        namespace = params.get("namespace", "default")
+        wait = params.get("wait", True)
+        
+        if not release_name:
+            raise TypeError("Missing required parameter: release_name")
+        
+        client = self._get_helm_client()
+        success = await client.uninstall_release(
+            release_name=release_name,
+            namespace=namespace,
+            wait=wait
+        )
+        
+        # Broadcast uninstall finished
+        await get_manager().broadcast({
+            "type": "helm_uninstall_finished",
+            "data": {"release_name": release_name, "namespace": namespace}
+        })
+        
+        return {"success": success}
+
+    async def _helm_list_repositories(self, params: dict) -> dict:
+        """List configured Helm chart repositories."""
+        client = self._get_helm_client()
+        repositories = await client.list_repositories()
+        return {
+            "repositories": repositories,
+            "count": len(repositories),
+        }
+
+    async def _helm_add_repository(self, params: dict) -> dict:
+        """Add a Helm chart repository."""
+        name = params.get("name")
+        url = params.get("url")
+        
+        if not name or not url:
+            raise TypeError("Missing required parameters: name, url")
+        
+        client = self._get_helm_client()
+        success = await client.add_repository(name, url)
+        
+        # Broadcast repository added
+        await get_manager().broadcast({
+            "type": "helm_repository_added",
+            "data": {"name": name, "url": url}
+        })
+        
+        return {"success": success}
+
+    async def _helm_remove_repository(self, params: dict) -> dict:
+        """Remove a Helm chart repository."""
+        name = params.get("name")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        client = self._get_helm_client()
+        success = await client.remove_repository(name)
+        
+        # Broadcast repository removed
+        await get_manager().broadcast({
+            "type": "helm_repository_removed",
+            "data": {"name": name}
+        })
+        
+        return {"success": success}
+
+    async def _helm_search_charts(self, params: dict) -> dict:
+        """Search for Helm charts."""
+        keyword = params.get("keyword")
+        repo = params.get("repo")
+        
+        if not keyword:
+            raise TypeError("Missing required parameter: keyword")
+        
+        client = self._get_helm_client()
+        charts = await client.search_charts(keyword, repo)
+        return {
+            "charts": charts,
+            "count": len(charts),
+        }
 
 
 # Singleton handler instance

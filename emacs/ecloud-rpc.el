@@ -63,9 +63,19 @@ Returns the result on success, signals an error on failure."
          (error-obj (plist-get response :error))
          (result (plist-get response :result)))
     (if error-obj
-        (error "JSON-RPC Error %d: %s"
-               (plist-get error-obj :code)
-               (plist-get error-obj :message))
+        (let* ((code (plist-get error-obj :code))
+               (message (plist-get error-obj :message))
+               (data (plist-get error-obj :data))
+               (error-type (when data (plist-get data :type)))
+               (details (when data (plist-get data :details)))
+               (suggestion (when details (plist-get details :suggestion))))
+          ;; Format error message with structured information
+          (let ((formatted-msg (format "JSON-RPC Error %d: %s" code message)))
+            (when error-type
+              (setq formatted-msg (format "%s\nType: %s" formatted-msg error-type)))
+            (when suggestion
+              (setq formatted-msg (format "%s\nSuggestion: %s" formatted-msg suggestion)))
+            (error "%s" formatted-msg)))
       result)))
 
 ;;; Public API
@@ -82,12 +92,17 @@ Returns the result on success, signals an error on failure."
          (url-request-data (encode-coding-string
                            (json-encode request)
                            'utf-8))
-         (buffer (url-retrieve-synchronously
-                  ecloud-server-url
-                  nil nil
-                  ecloud-request-timeout)))
+         (buffer (condition-case err
+                     (url-retrieve-synchronously
+                      ecloud-server-url
+                      nil nil
+                      ecloud-request-timeout)
+                   (error
+                    (error "Failed to connect to ecloud server at %s: %s"
+                           ecloud-server-url (error-message-string err))))))
     (unless buffer
-      (error "Failed to connect to ecloud server at %s" ecloud-server-url))
+      (error "Failed to connect to ecloud server at %s. Please ensure the server is running"
+             ecloud-server-url))
     (unwind-protect
         (with-current-buffer buffer
           ;; Skip HTTP headers
@@ -641,6 +656,104 @@ Returns plist with :port."
 (defun ecloud-rpc-k8s-resource-metrics-async (callback &optional error-callback)
   "Get resource metrics asynchronously."
   (ecloud-rpc-request-async "k8s_resource_metrics" callback nil error-callback))
+
+;;; Helm Operations
+
+(defun ecloud-rpc-helm-list-releases (&optional namespace all-namespaces)
+  "List Helm releases. NAMESPACE for filtering, ALL-NAMESPACES to list all."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (ecloud-rpc-request "helm_list_releases" params)))
+
+(defun ecloud-rpc-helm-list-releases-async (callback &optional namespace all-namespaces error-callback)
+  "List Helm releases asynchronously."
+  (let ((params nil))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (ecloud-rpc-request-async "helm_list_releases" callback params error-callback)))
+
+(defun ecloud-rpc-helm-get-release-details (name &optional namespace)
+  "Get details for Helm release NAME in NAMESPACE."
+  (let ((params (list :name name)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request "helm_get_release_details" params)))
+
+(defun ecloud-rpc-helm-get-release-details-async (name callback &optional namespace error-callback)
+  "Get details for Helm release NAME asynchronously."
+  (let ((params (list :name name)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (ecloud-rpc-request-async "helm_get_release_details" callback params error-callback)))
+
+(defun ecloud-rpc-helm-install-chart (release-name chart-ref &optional namespace values create-namespace wait timeout)
+  "Install Helm chart CHART-REF as RELEASE-NAME."
+  (let ((params (list :release_name release-name :chart_ref chart-ref)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when values (setq params (plist-put params :values values)))
+    (when create-namespace (setq params (plist-put params :create_namespace create-namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (when timeout (setq params (plist-put params :timeout timeout)))
+    (ecloud-rpc-request "helm_install_chart" params)))
+
+(defun ecloud-rpc-helm-install-chart-async (release-name chart-ref callback &optional namespace values create-namespace wait timeout error-callback)
+  "Install Helm chart CHART-REF as RELEASE-NAME asynchronously."
+  (let ((params (list :release_name release-name :chart_ref chart-ref)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when values (setq params (plist-put params :values values)))
+    (when create-namespace (setq params (plist-put params :create_namespace create-namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (when timeout (setq params (plist-put params :timeout timeout)))
+    (ecloud-rpc-request-async "helm_install_chart" callback params error-callback)))
+
+(defun ecloud-rpc-helm-upgrade-release (release-name &optional chart-ref namespace values version wait timeout)
+  "Upgrade Helm release RELEASE-NAME."
+  (let ((params (list :release_name release-name)))
+    (when chart-ref (setq params (plist-put params :chart_ref chart-ref)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when values (setq params (plist-put params :values values)))
+    (when version (setq params (plist-put params :version version)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (when timeout (setq params (plist-put params :timeout timeout)))
+    (ecloud-rpc-request "helm_upgrade_release" params)))
+
+(defun ecloud-rpc-helm-upgrade-release-async (release-name callback &optional chart-ref namespace values version wait timeout error-callback)
+  "Upgrade Helm release RELEASE-NAME asynchronously."
+  (let ((params (list :release_name release-name)))
+    (when chart-ref (setq params (plist-put params :chart_ref chart-ref)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when values (setq params (plist-put params :values values)))
+    (when version (setq params (plist-put params :version version)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (when timeout (setq params (plist-put params :timeout timeout)))
+    (ecloud-rpc-request-async "helm_upgrade_release" callback params error-callback)))
+
+(defun ecloud-rpc-helm-rollback-release (release-name revision &optional namespace wait)
+  "Rollback Helm release RELEASE-NAME to REVISION."
+  (let ((params (list :release_name release-name :revision revision)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (ecloud-rpc-request "helm_rollback_release" params)))
+
+(defun ecloud-rpc-helm-rollback-release-async (release-name revision callback &optional namespace wait error-callback)
+  "Rollback Helm release RELEASE-NAME to REVISION asynchronously."
+  (let ((params (list :release_name release-name :revision revision)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (ecloud-rpc-request-async "helm_rollback_release" callback params error-callback)))
+
+(defun ecloud-rpc-helm-uninstall-release (release-name &optional namespace wait)
+  "Uninstall Helm release RELEASE-NAME."
+  (let ((params (list :release_name release-name)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (ecloud-rpc-request "helm_uninstall_release" params)))
+
+(defun ecloud-rpc-helm-uninstall-release-async (release-name callback &optional namespace wait error-callback)
+  "Uninstall Helm release RELEASE-NAME asynchronously."
+  (let ((params (list :release_name release-name)))
+    (when namespace (setq params (plist-put params :namespace namespace)))
+    (when wait (setq params (plist-put params :wait wait)))
+    (ecloud-rpc-request-async "helm_uninstall_release" callback params error-callback)))
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

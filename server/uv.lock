@@ -533,6 +533,7 @@ dependencies = [
     { name = "google-cloud-storage" },
     { name = "kubernetes" },
     { name = "pydantic" },
+    { name = "pyhelm3" },
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -556,6 +557,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.26.0" },
     { name = "kubernetes", specifier = ">=29.0.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
+    { name = "pyhelm3", specifier = ">=0.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
@@ -1613,6 +1615,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b0/77/a5b8c569bf593b0140bde72ea885a803b82086995367bf2037de0159d924/pygments-2.19.2.tar.gz", hash = "sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887", size = 4968631, upload-time = "2025-06-21T13:39:12.283Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl", hash = "sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b", size = 1225217, upload-time = "2025-06-21T13:39:07.939Z" },
+]
+
+[[package]]
+name = "pyhelm3"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/06/87de4675e8c114a0251e87ed97e4cae1b9bc4d36d3471348ac20c7e7db1e/pyhelm3-0.4.0.tar.gz", hash = "sha256:7ce688cab8e12df5240641774c36acfd3cad6d9a6325781bc7b5a354e522c594", size = 20221, upload-time = "2024-07-31T10:32:17.253Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/fd/8521dc138655be8f9d736d30dd198bdeb35b8b2f0683331e5b08febd9b06/pyhelm3-0.4.0-py3-none-any.whl", hash = "sha256:6f608891fbe8db9b8015b839f29524dccd6eade0da879820690d71de9c3f2f8d", size = 20925, upload-time = "2024-07-31T10:32:15.508Z" },
 ]
 
 [[package]]

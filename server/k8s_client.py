@@ -374,6 +374,25 @@ class K8sClient:
         self._connected_cluster = None
         self._ca_cert_path = None
     
+    def get_cluster_credentials(self) -> dict[str, str] | None:
+        """Get current cluster credentials for Helm client.
+        
+        Returns:
+            Dict with keys: endpoint, ca_cert_path, token
+            None if not connected
+        """
+        if not self._config or not self._ca_cert_path or not self._credentials:
+            return None
+        
+        # Ensure token is fresh
+        self._credentials.refresh(Request())
+        
+        return {
+            "endpoint": self._config.host,
+            "ca_cert_path": self._ca_cert_path,
+            "token": self._credentials.token,
+        }
+    
     # --- Namespace Operations ---
     
     @auto_refresh_token

@@ -52,7 +52,7 @@
 ;;; State
 
 (defvar ecloud-k8s--current-view 'pods
-  "Current view type: clusters, namespaces, pods, services, ingresses, deployments.")
+  "Current view type: clusters, namespaces, pods, services, ingresses, deployments, helm-releases.")
 
 (defvar ecloud-k8s--current-namespace nil
   "Current namespace filter. nil means all namespaces.")
@@ -67,6 +67,50 @@
   "Name of the log streaming buffer.")
 
 ;;; Helper functions
+
+(defun ecloud-k8s--display-error (error-msg &optional context)
+  "Display ERROR-MSG with optional CONTEXT in a user-friendly way.
+Parses structured error messages and displays them appropriately."
+  (let ((lines (split-string error-msg "\n"))
+        (main-msg "")
+        (error-type nil)
+        (suggestion nil))
+    ;; Parse structured error format
+    (dolist (line lines)
+      (cond
+       ((string-match "^JSON-RPC Error \\([0-9-]+\\): \\(.*\\)" line)
+        (setq main-msg (match-string 2 line)))
+       ((string-match "^Type: \\(.*\\)" line)
+        (setq error-type (match-string 1 line)))
+       ((string-match "^Suggestion: \\(.*\\)" line)
+        (setq suggestion (match-string 1 line)))))
+    
+    ;; Build display message
+    (let ((display-msg main-msg))
+      (when context
+        (setq display-msg (format "%s: %s" context display-msg)))
+      (when suggestion
+        (setq display-msg (format "%s\n\n💡 %s" display-msg suggestion)))
+      
+      ;; Display based on error type
+      (if (or error-type suggestion)
+          ;; Show in a temporary buffer for structured errors
+          (let ((buffer (get-buffer-create "*ECloud Error*")))
+            (with-current-buffer buffer
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (insert "❌ ECloud Error\n")
+                (insert "═══════════════\n\n")
+                (when error-type
+                  (insert (format "Type: %s\n\n" error-type)))
+                (insert (format "%s\n" main-msg))
+                (when suggestion
+                  (insert (format "\n💡 Suggestion:\n%s\n" suggestion)))
+                (goto-char (point-min))
+                (special-mode))
+              (pop-to-buffer buffer)))
+        ;; Simple message for non-structured errors
+        (message "%s" display-msg)))))
 
 (defun ecloud-k8s--format-status (status)
   "Format STATUS with appropriate face."
@@ -317,6 +361,401 @@
              (message "Found %d namespaces." (length namespaces))))))
      (lambda (err) (message "Error: %s" err)))))
 
+;;; Helm Releases
+
+(defun ecloud-k8s--fetch-helm-releases ()
+  "Fetch and display Helm releases."
+  (let ((buffer (get-buffer-create "*ECloud-Helm-Releases*")))
+    (with-current-buffer buffer
+      (ecloud-helm-list-mode)
+      (setq ecloud-k8s--current-view 'helm-releases)
+      (setq tabulated-list-entries nil)
+      (tabulated-list-print t)
+      (message "Fetching Helm releases...")
+      (let ((buffer (current-buffer)))
+        (ecloud-rpc-helm-list-releases-async
+         (lambda (resp)
+           (let ((releases (plist-get resp :releases)))
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (setq tabulated-list-entries
+                       (mapcar #'ecloud-k8s--helm-release-to-entry releases))
+                 (tabulated-list-print)
+                 (message "Found %d Helm releases." (length releases))))))
+         ecloud-k8s--current-namespace
+         (not ecloud-k8s--current-namespace)  ; all-namespaces when no namespace filter
+         (lambda (err) (ecloud-k8s--display-error err "Failed to fetch Helm releases"))))
+    (switch-to-buffer buffer))))
+
+(defun ecloud-k8s--helm-release-to-entry (release)
+  "Convert RELEASE dict to tabulated-list entry."
+  (list release
+        (vector
+         (propertize (or (plist-get release :name) "???") 'face 'ecloud-k8s-name-face)
+         (propertize (or (plist-get release :namespace) "???") 'face 'ecloud-k8s-namespace-face)
+         (or (plist-get release :chart) "")
+         (or (plist-get release :version) "")
+         (ecloud-k8s--format-status (or (plist-get release :status) "")))))
+
+(defun ecloud-k8s-helm-list ()
+  "List Helm releases in current cluster."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster. Connect first with ecloud-k8s-list"))
+  (ecloud-k8s--fetch-helm-releases))
+
+(defun ecloud-k8s-helm-describe ()
+  "Show details of Helm release at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-id))
+         (release-name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (unless release-name
+      (user-error "No Helm release selected"))
+    (message "Fetching details for %s/%s..." namespace release-name)
+    (ecloud-rpc-helm-get-release-details-async
+     release-name
+     (lambda (resp)
+       (let ((details (plist-get resp :release))
+             (buffer (get-buffer-create (format "*Helm Release: %s*" release-name))))
+         (with-current-buffer buffer
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (insert (format "=== Helm Release: %s ===\n\n" release-name))
+             (insert (format "Namespace:    %s\n" (plist-get details :namespace)))
+             (insert (format "Chart:        %s\n" (plist-get details :chart)))
+             (insert (format "Version:      %s\n" (plist-get details :version)))
+             (insert (format "App Version:  %s\n" (or (plist-get details :app_version) "N/A")))
+             (insert (format "Status:       %s\n" (plist-get details :status)))
+             (insert (format "Revision:     %d\n" (or (plist-get details :revision) 0)))
+             (insert (format "Updated:      %s\n\n" (or (plist-get details :updated) "N/A")))
+             
+             ;; Values section
+             (insert "=== Values ===\n\n")
+             (let ((values (plist-get details :values)))
+               (if values
+                   (insert (pp-to-string values))
+                 (insert "No custom values\n")))
+             (insert "\n")
+             
+             ;; Revision history section
+             (insert "=== Revision History ===\n\n")
+             (let ((history (plist-get details :revisionHistory)))
+               (if history
+                   (dolist (rev history)
+                     (insert (format "Revision %d: %s - %s\n"
+                                     (plist-get rev :revision)
+                                     (plist-get rev :status)
+                                     (or (plist-get rev :description) ""))))
+                 (insert "No revision history available\n")))
+             
+             ;; Notes section
+             (when-let ((notes (plist-get details :notes)))
+               (insert "\n=== Notes ===\n\n")
+               (insert notes))
+             
+             (goto-char (point-min))
+             (special-mode))
+           (pop-to-buffer buffer))))
+     namespace
+     (lambda (err) (ecloud-k8s--display-error err "Failed to fetch release details")))))
+
+(defun ecloud-k8s-helm-install ()
+  "Install a new Helm chart."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster. Connect first with ecloud-k8s-list"))
+  (let* ((release-name (read-string "Release name: "))
+         (chart-ref (read-string "Chart (repo/chart or path): "))
+         (namespace (read-string "Namespace: " (or ecloud-k8s--current-namespace "default")))
+         (edit-values (y-or-n-p "Edit values? ")))
+    (when (string-empty-p release-name)
+      (user-error "Release name cannot be empty"))
+    (when (string-empty-p chart-ref)
+      (user-error "Chart reference cannot be empty"))
+    (if edit-values
+        (ecloud-k8s-helm--edit-values-and-install release-name chart-ref namespace)
+      (ecloud-k8s-helm--install-with-defaults release-name chart-ref namespace))))
+
+(defun ecloud-k8s-helm--install-with-defaults (release-name chart-ref namespace)
+  "Install Helm chart with default values."
+  (message "Installing %s as %s in namespace %s..." chart-ref release-name namespace)
+  (ecloud-rpc-helm-install-chart-async
+   release-name
+   chart-ref
+   (lambda (resp)
+     (let ((release (plist-get resp :release)))
+       (message "Successfully installed %s (status: %s)"
+                release-name
+                (plist-get release :status))
+       (when (eq ecloud-k8s--current-view 'helm-releases)
+         (ecloud-k8s-refresh))))
+   namespace
+   nil  ; values
+   t    ; create-namespace
+   t    ; wait
+   300  ; timeout
+   (lambda (err) (ecloud-k8s--display-error err "Failed to install chart"))))
+
+(defun ecloud-k8s-helm--edit-values-and-install (release-name chart-ref namespace)
+  "Open values editor and install chart with custom values."
+  (let ((buffer (get-buffer-create (format "*Helm Values: %s*" release-name))))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (insert "# Edit values for " chart-ref "\n")
+      (insert "# Save and close (C-c C-c) to install, or kill buffer (C-c C-k) to cancel\n\n")
+      (yaml-mode)
+      (local-set-key (kbd "C-c C-c")
+                     (lambda ()
+                       (interactive)
+                       (let* ((content (buffer-substring-no-properties (point-min) (point-max)))
+                              ;; Remove comment lines
+                              (lines (split-string content "\n"))
+                              (yaml-lines (seq-filter (lambda (line)
+                                                        (not (string-prefix-p "#" (string-trim line))))
+                                                      lines))
+                              (yaml-str (string-join yaml-lines "\n")))
+                         (kill-buffer)
+                         (if (string-empty-p (string-trim yaml-str))
+                             (ecloud-k8s-helm--install-with-defaults release-name chart-ref namespace)
+                           ;; Parse YAML to dict (simplified - in real implementation would use yaml parser)
+                           (message "Installing %s with custom values..." release-name)
+                           (ecloud-rpc-helm-install-chart-async
+                            release-name
+                            chart-ref
+                            (lambda (resp)
+                              (let ((release (plist-get resp :release)))
+                                (message "Successfully installed %s (status: %s)"
+                                         release-name
+                                         (plist-get release :status))
+                                (when (eq ecloud-k8s--current-view 'helm-releases)
+                                  (ecloud-k8s-refresh))))
+                            namespace
+                            (list :raw yaml-str)  ; Send raw YAML string
+                            t    ; create-namespace
+                            t    ; wait
+                            300  ; timeout
+                            (lambda (err) (ecloud-k8s--display-error err "Failed to install chart")))))))
+      (local-set-key (kbd "C-c C-k")
+                     (lambda ()
+                       (interactive)
+                       (when (y-or-n-p "Cancel installation? ")
+                         (kill-buffer)
+                         (message "Installation cancelled")))))
+    (pop-to-buffer buffer)
+    (message "Edit values and press C-c C-c to install, or C-c C-k to cancel")))
+
+(defun ecloud-k8s-helm-upgrade ()
+  "Upgrade Helm release at point."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster"))
+  (let* ((entry (tabulated-list-get-id))
+         (release-name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (unless release-name
+      (user-error "No Helm release selected"))
+    (let ((edit-values (y-or-n-p (format "Edit values for %s? " release-name))))
+      (if edit-values
+          (ecloud-k8s-helm--edit-values-and-upgrade release-name namespace)
+        (ecloud-k8s-helm--upgrade-with-current-values release-name namespace)))))
+
+(defun ecloud-k8s-helm--upgrade-with-current-values (release-name namespace)
+  "Upgrade Helm release with current values."
+  (message "Upgrading %s in namespace %s..." release-name namespace)
+  (ecloud-rpc-helm-upgrade-release-async
+   release-name
+   (lambda (resp)
+     (let ((release (plist-get resp :release)))
+       (message "Successfully upgraded %s to revision %d"
+                release-name
+                (or (plist-get release :revision) 0))
+       (when (eq ecloud-k8s--current-view 'helm-releases)
+         (ecloud-k8s-refresh))))
+   nil  ; chart-ref (use current)
+   namespace
+   nil  ; values (use current)
+   nil  ; version
+   t    ; wait
+   300  ; timeout
+   (lambda (err) (ecloud-k8s--display-error err "Failed to upgrade release"))))
+
+(defun ecloud-k8s-helm--edit-values-and-upgrade (release-name namespace)
+  "Open values editor and upgrade release with custom values."
+  ;; First fetch current values
+  (message "Fetching current values for %s..." release-name)
+  (ecloud-rpc-helm-get-release-details-async
+   release-name
+   (lambda (resp)
+     (let* ((details (plist-get resp :release))
+            (current-values (plist-get details :values))
+            (buffer (get-buffer-create (format "*Helm Values: %s*" release-name))))
+       (with-current-buffer buffer
+         (erase-buffer)
+         (insert "# Edit values for " release-name "\n")
+         (insert "# Save and close (C-c C-c) to upgrade, or kill buffer (C-c C-k) to cancel\n\n")
+         (when current-values
+           (insert (pp-to-string current-values)))
+         (yaml-mode)
+         (local-set-key (kbd "C-c C-c")
+                        (lambda ()
+                          (interactive)
+                          (let* ((content (buffer-substring-no-properties (point-min) (point-max)))
+                                 ;; Remove comment lines
+                                 (lines (split-string content "\n"))
+                                 (yaml-lines (seq-filter (lambda (line)
+                                                           (not (string-prefix-p "#" (string-trim line))))
+                                                         lines))
+                                 (yaml-str (string-join yaml-lines "\n")))
+                            (kill-buffer)
+                            (message "Upgrading %s with custom values..." release-name)
+                            (ecloud-rpc-helm-upgrade-release-async
+                             release-name
+                             (lambda (resp)
+                               (let ((release (plist-get resp :release)))
+                                 (message "Successfully upgraded %s to revision %d"
+                                          release-name
+                                          (or (plist-get release :revision) 0))
+                                 (when (eq ecloud-k8s--current-view 'helm-releases)
+                                   (ecloud-k8s-refresh))))
+                             nil  ; chart-ref
+                             namespace
+                             (list :raw yaml-str)  ; Send raw YAML string
+                             nil  ; version
+                             t    ; wait
+                             300  ; timeout
+                             (lambda (err) (ecloud-k8s--display-error err "Failed to upgrade release"))))))
+         (local-set-key (kbd "C-c C-k")
+                        (lambda ()
+                          (interactive)
+                          (when (y-or-n-p "Cancel upgrade? ")
+                            (kill-buffer)
+                            (message "Upgrade cancelled")))))
+       (pop-to-buffer buffer)
+       (message "Edit values and press C-c C-c to upgrade, or C-c C-k to cancel")))
+   namespace
+   (lambda (err) (ecloud-k8s--display-error err "Failed to fetch current values"))))
+
+(defun ecloud-k8s-helm-history ()
+  "Show revision history for Helm release at point in an interactive list."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster"))
+  (let* ((entry (tabulated-list-get-id))
+         (release-name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (unless release-name
+      (user-error "No Helm release selected"))
+    (message "Fetching history for %s..." release-name)
+    (ecloud-rpc-helm-get-release-details-async
+     release-name
+     (lambda (resp)
+       (let* ((details (plist-get resp :release))
+              (history (plist-get details :revisionHistory))
+              (current-revision (plist-get details :revision))
+              (buffer (get-buffer-create (format "*Helm History: %s*" release-name))))
+         (with-current-buffer buffer
+           (ecloud-helm-history-mode)
+           ;; Store release info for rollback
+           (setq-local ecloud-k8s--helm-release-name release-name)
+           (setq-local ecloud-k8s--helm-namespace namespace)
+           (setq-local ecloud-k8s--helm-current-revision current-revision)
+           
+           ;; Set up tabulated list
+           (setq tabulated-list-format
+                 [("Revision" 10 t)
+                  ("Updated" 20 t)
+                  ("Status" 15 t)
+                  ("Chart" 30 t)
+                  ("Description" 50 nil)])
+           (setq tabulated-list-padding 2)
+           (tabulated-list-init-header)
+           
+           ;; Populate entries (newest first)
+           (setq tabulated-list-entries
+                 (mapcar
+                  (lambda (rev)
+                    (let* ((rev-num (plist-get rev :revision))
+                           (updated (plist-get rev :updated))
+                           (status (plist-get rev :status))
+                           (chart (plist-get rev :chart))
+                           (version (plist-get rev :version))
+                           (desc (or (plist-get rev :description) ""))
+                           (is-current (= rev-num current-revision)))
+                      (list rev
+                            (vector
+                             (if is-current
+                                 (propertize (format "%d *" rev-num) 'face 'bold)
+                               (format "%d" rev-num))
+                             (if updated
+                                 (format-time-string "%Y-%m-%d %H:%M:%S"
+                                                     (date-to-time updated))
+                               "N/A")
+                             (propertize status
+                                         'face (cond
+                                                ((string= status "deployed") 'ecloud-k8s-running-face)
+                                                ((string= status "failed") 'ecloud-k8s-error-face)
+                                                (t 'default)))
+                             (format "%s-%s" chart version)
+                             desc))))
+                  (reverse history)))  ; Newest first
+           
+           (tabulated-list-print t)
+           (goto-char (point-min)))
+         (pop-to-buffer buffer)
+         (message "Press 'r' to rollback to selected revision, 'q' to quit")))
+     namespace
+     (lambda (err) (ecloud-k8s--display-error err "Failed to fetch release history")))))
+
+(defun ecloud-k8s-helm-rollback ()
+  "Rollback Helm release at point."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster"))
+  (let* ((entry (tabulated-list-get-id))
+         (release-name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (unless release-name
+      (user-error "No Helm release selected"))
+    (let ((revision (read-number "Rollback to revision: ")))
+      (when (y-or-n-p (format "Rollback %s to revision %d? " release-name revision))
+        (message "Rolling back %s to revision %d..." release-name revision)
+        (ecloud-rpc-helm-rollback-release-async
+         release-name
+         revision
+         (lambda (resp)
+           (let ((release (plist-get resp :release)))
+             (message "Successfully rolled back %s to revision %d"
+                      release-name
+                      revision)
+             (when (eq ecloud-k8s--current-view 'helm-releases)
+               (ecloud-k8s-refresh))))
+         namespace
+         t  ; wait
+         (lambda (err) (ecloud-k8s--display-error err "Failed to rollback release")))))))
+
+(defun ecloud-k8s-helm-uninstall ()
+  "Uninstall Helm release at point."
+  (interactive)
+  (unless ecloud-k8s--current-cluster
+    (user-error "Not connected to a cluster"))
+  (let* ((entry (tabulated-list-get-id))
+         (release-name (plist-get entry :name))
+         (namespace (plist-get entry :namespace)))
+    (unless release-name
+      (user-error "No Helm release selected"))
+    (when (y-or-n-p (format "Uninstall %s from namespace %s? " release-name namespace))
+      (message "Uninstalling %s..." release-name)
+      (ecloud-rpc-helm-uninstall-release-async
+       release-name
+       (lambda (_resp)
+         (message "Successfully uninstalled %s" release-name)
+         (when (eq ecloud-k8s--current-view 'helm-releases)
+           (ecloud-k8s-refresh)))
+       namespace
+       t  ; wait
+       (lambda (err) (ecloud-k8s--display-error err "Failed to uninstall release"))))))
+
 ;;; Actions
 
 (defun ecloud-k8s-enter ()
@@ -329,6 +768,7 @@
     ('ingresses (ecloud-k8s-view-yaml))
     ('deployments (ecloud-k8s-view-yaml))
     ('namespaces (ecloud-k8s-select-this-namespace))
+    ('helm-releases (ecloud-k8s-helm-describe))
     (_ (message "No action defined for this view"))))
 
 (defun ecloud-k8s-select-this-namespace ()
@@ -498,7 +938,8 @@
     ('services (ecloud-k8s--fetch-services))
     ('ingresses (ecloud-k8s--fetch-ingresses))
     ('deployments (ecloud-k8s--fetch-deployments))
-    ('namespaces (ecloud-k8s--fetch-namespaces))))
+    ('namespaces (ecloud-k8s--fetch-namespaces))
+    ('helm-releases (ecloud-k8s--fetch-helm-releases))))
 
 (defun ecloud-k8s-disconnect ()
   "Disconnect from cluster and return to cluster list."
@@ -609,6 +1050,11 @@
   (interactive)
   (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [n]Namespaces [N]Filter [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
 
+(defun ecloud-k8s-helm-help ()
+  "Show help for ecloud-helm-list-mode."
+  (interactive)
+  (message "Helm: [RET]Describe [i]Install [u]Upgrade [r]Rollback [h]History [d]Uninstall [g]Refresh [N]Filter [p]Pods [s]Services [n]Namespaces [Q]Disconnect [?]Help"))
+
 ;;; Mode definitions
 
 (defvar ecloud-k8s-mode-map
@@ -692,6 +1138,166 @@
   (let ((inhibit-read-only t))
     (erase-buffer)
     (insert "=== Log buffer cleared ===\n\n")))
+
+;;; Helm history mode
+
+(defvar ecloud-helm-history-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "r") #'ecloud-k8s-helm-history-rollback)
+    (define-key map (kbd "g") #'ecloud-k8s-helm-history-refresh)
+    (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "?") #'ecloud-k8s-helm-history-help)
+    map)
+  "Keymap for `ecloud-helm-history-mode'.")
+
+(define-derived-mode ecloud-helm-history-mode tabulated-list-mode "Helm-History"
+  "Major mode for viewing Helm release revision history.
+\\{ecloud-helm-history-mode-map}"
+  (setq tabulated-list-padding 2)
+  (when (fboundp 'evil-motion-state)
+    (evil-motion-state)))
+
+(defun ecloud-k8s-helm-history-help ()
+  "Show help for helm history mode."
+  (interactive)
+  (message "Helm History: [r]Rollback [g]Refresh [?]Help [q]Quit"))
+
+(defun ecloud-k8s-helm-history-rollback ()
+  "Rollback to the revision at point."
+  (interactive)
+  (let* ((entry (tabulated-list-get-id))
+         (revision (plist-get entry :revision))
+         (release-name ecloud-k8s--helm-release-name)
+         (namespace ecloud-k8s--helm-namespace)
+         (current-revision ecloud-k8s--helm-current-revision))
+    (unless revision
+      (user-error "No revision selected"))
+    (when (= revision current-revision)
+      (user-error "Already at revision %d" revision))
+    (when (y-or-n-p (format "Rollback %s to revision %d? " release-name revision))
+      (message "Rolling back %s to revision %d..." release-name revision)
+      (ecloud-rpc-helm-rollback-release-async
+       release-name
+       revision
+       (lambda (resp)
+         (message "Successfully rolled back %s to revision %d" release-name revision)
+         ;; Refresh the history view
+         (ecloud-k8s-helm-history-refresh))
+       namespace
+       t  ; wait
+       (lambda (err) (ecloud-k8s--display-error err "Failed to rollback release"))))))
+
+(defun ecloud-k8s-helm-history-refresh ()
+  "Refresh the helm history view."
+  (interactive)
+  (let ((release-name ecloud-k8s--helm-release-name)
+        (namespace ecloud-k8s--helm-namespace))
+    (message "Refreshing history for %s..." release-name)
+    (ecloud-rpc-helm-get-release-details-async
+     release-name
+     (lambda (resp)
+       (let* ((details (plist-get resp :release))
+              (history (plist-get details :revisionHistory))
+              (current-revision (plist-get details :revision)))
+         ;; Update local variables
+         (setq-local ecloud-k8s--helm-current-revision current-revision)
+         
+         ;; Update entries
+         (setq tabulated-list-entries
+               (mapcar
+                (lambda (rev)
+                  (let* ((rev-num (plist-get rev :revision))
+                         (updated (plist-get rev :updated))
+                         (status (plist-get rev :status))
+                         (chart (plist-get rev :chart))
+                         (version (plist-get rev :version))
+                         (desc (or (plist-get rev :description) ""))
+                         (is-current (= rev-num current-revision)))
+                    (list rev
+                          (vector
+                           (if is-current
+                               (propertize (format "%d *" rev-num) 'face 'bold)
+                             (format "%d" rev-num))
+                           (if updated
+                               (format-time-string "%Y-%m-%d %H:%M:%S"
+                                                   (date-to-time updated))
+                             "N/A")
+                           (propertize status
+                                       'face (cond
+                                              ((string= status "deployed") 'ecloud-k8s-running-face)
+                                              ((string= status "failed") 'ecloud-k8s-error-face)
+                                              (t 'default)))
+                           (format "%s-%s" chart version)
+                           desc))))
+                (reverse history)))
+         
+         (tabulated-list-print t)
+         (message "History refreshed")))
+     namespace
+     (lambda (err) (ecloud-k8s--display-error err "Failed to refresh history")))))
+
+;;; Evil mode support for Helm history mode
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-helm-history-mode 'motion)
+  (evil-define-key 'motion ecloud-helm-history-mode-map
+    (kbd "r") #'ecloud-k8s-helm-history-rollback
+    (kbd "g") #'ecloud-k8s-helm-history-refresh
+    (kbd "?") #'ecloud-k8s-helm-history-help
+    (kbd "q") #'quit-window))
+
+;;; Helm list mode
+
+(defvar ecloud-helm-list-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map ecloud-k8s-mode-map)
+    ;; Helm-specific keybindings
+    (define-key map (kbd "RET") #'ecloud-k8s-helm-describe)
+    (define-key map (kbd "i") #'ecloud-k8s-helm-install)
+    (define-key map (kbd "u") #'ecloud-k8s-helm-upgrade)
+    (define-key map (kbd "r") #'ecloud-k8s-helm-rollback)
+    (define-key map (kbd "h") #'ecloud-k8s-helm-history)
+    (define-key map (kbd "d") #'ecloud-k8s-helm-uninstall)
+    (define-key map (kbd "g") #'ecloud-k8s-refresh)
+    (define-key map (kbd "?") #'ecloud-k8s-helm-help)
+    map)
+  "Keymap for `ecloud-helm-list-mode'.")
+
+(define-derived-mode ecloud-helm-list-mode tabulated-list-mode "ECloud-Helm"
+  "Major mode for listing Helm releases.
+\\{ecloud-helm-list-mode-map}"
+  (setq tabulated-list-format
+        [("Name" 30 t)
+         ("Namespace" 20 t)
+         ("Chart" 30 t)
+         ("Version" 15 t)
+         ("Status" 15 t)])
+  (setq tabulated-list-padding 2)
+  (tabulated-list-init-header)
+  (add-hook 'tabulated-list-revert-hook #'ecloud-k8s-refresh nil t)
+  (when (fboundp 'evil-motion-state)
+    (evil-motion-state)))
+
+;;; Evil mode support for Helm list mode
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-helm-list-mode 'motion)
+  (evil-define-key 'motion ecloud-helm-list-mode-map
+    (kbd "RET") #'ecloud-k8s-helm-describe
+    (kbd "i") #'ecloud-k8s-helm-install
+    (kbd "u") #'ecloud-k8s-helm-upgrade
+    (kbd "r") #'ecloud-k8s-helm-rollback
+    (kbd "h") #'ecloud-k8s-helm-history
+    (kbd "d") #'ecloud-k8s-helm-uninstall
+    (kbd "g") #'ecloud-k8s-refresh
+    (kbd "p") #'ecloud-k8s-switch-to-pods
+    (kbd "s") #'ecloud-k8s-switch-to-services
+    (kbd "n") #'ecloud-k8s-switch-to-namespaces
+    (kbd "N") #'ecloud-k8s-select-namespace
+    (kbd "y") #'ecloud-k8s-view-yaml
+    (kbd "Q") #'ecloud-k8s-disconnect
+    (kbd "?") #'ecloud-k8s-helm-help
+    (kbd "q") #'quit-window))
 
 ;;; Entry point
 

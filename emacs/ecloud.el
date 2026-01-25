@@ -55,6 +55,7 @@
 (require 'ecloud-compute)
 (require 'ecloud-sql)
 (require 'ecloud-k8s)
+(require 'ecloud-transient)
 
 ;;; User customization
 
@@ -64,6 +65,10 @@
   :prefix "ecloud-")
 
 ;;; Autoloads
+
+;;;###autoload
+(autoload 'ecloud-menu "ecloud-transient"
+  "Open the main ECloud menu." t)
 
 ;;;###autoload
 (autoload 'ecloud-browse "ecloud-browser"
