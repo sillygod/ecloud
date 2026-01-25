@@ -1059,7 +1059,8 @@ Parses structured error messages and displays them appropriately."
 
 (defun ecloud-k8s-view-kind ()
   "View resources of a specific Kubernetes kind with completion.
-Fetches available kinds dynamically from the Kubernetes API."
+Fetches available kinds dynamically from the Kubernetes API.
+Shows annotations with API version, namespace scope, and kind."
   (interactive)
   (unless ecloud-k8s--current-cluster
     (user-error "Not connected to a cluster"))
@@ -1069,12 +1070,27 @@ Fetches available kinds dynamically from the Kubernetes API."
   (ecloud-rpc-k8s-list-api-resources-async
    (lambda (resp)
      (let* ((api-resources (plist-get resp :resources))
-            ;; Extract resource names and create completion list
-            (kind-names (mapcar (lambda (r) (plist-get r :name)) api-resources))
-            ;; Sort alphabetically
-            (sorted-kinds (sort kind-names #'string<))
-            ;; Prompt user to select a kind
-            (kind (completing-read "Kubernetes kind: " sorted-kinds nil t)))
+            ;; Create completion table with annotations
+            (completion-table
+             (lambda (string pred action)
+               (if (eq action 'metadata)
+                   ;; Return metadata for completion annotations
+                   `(metadata
+                     (annotation-function . ecloud-k8s--annotate-resource)
+                     (category . kubernetes-resource))
+                 ;; Standard completion
+                 (complete-with-action action
+                                       (mapcar (lambda (r) (plist-get r :name)) api-resources)
+                                       string pred))))
+            ;; Store resources in buffer-local variable for annotation function
+            (kind nil))
+       
+       ;; Store api-resources for annotation function
+       (setq ecloud-k8s--api-resources-cache api-resources)
+       
+       ;; Prompt user to select a kind with annotations
+       (setq kind (completing-read "Kubernetes kind: " completion-table nil t))
+       
        (when (and kind (not (string-empty-p kind)))
          (ecloud-notify (format "Fetching %s..." kind))
          (ecloud-rpc-k8s-get-resources-async
@@ -1124,6 +1140,30 @@ Fetches available kinds dynamically from the Kubernetes API."
           (not ecloud-k8s--current-namespace)
           (lambda (err) (ecloud-k8s--display-error err (format "Failed to fetch %s" kind)))))))
    (lambda (err) (ecloud-k8s--display-error err "Failed to fetch API resources"))))
+
+(defvar ecloud-k8s--api-resources-cache nil
+  "Cache of API resources for annotation function.")
+
+(defun ecloud-k8s--annotate-resource (candidate)
+  "Annotate CANDIDATE with API version, namespace scope, and kind.
+Similar to kubectl api-resources output."
+  (when-let* ((resources ecloud-k8s--api-resources-cache)
+              (resource (seq-find (lambda (r) (string= (plist-get r :name) candidate))
+                                  resources)))
+    (let* ((api-group (plist-get resource :apiGroup))
+           (api-version (plist-get resource :apiVersion))
+           (namespaced (plist-get resource :namespaced))
+           (kind (plist-get resource :kind))
+           ;; Format API version with group
+           (full-api (if (and api-group (not (string-empty-p api-group)))
+                         (format "%s/%s" api-group api-version)
+                       api-version))
+           ;; Namespace scope
+           (scope (if namespaced "ns" "cluster"))
+           ;; Use shorter labels and better spacing
+           ;; Format: " API-VERSION (scope) Kind"
+           (annotation (format " %s (%s) %s" full-api scope kind)))
+      annotation)))
 
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."

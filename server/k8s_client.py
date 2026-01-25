@@ -280,6 +280,11 @@ class K8sClient:
         self._api_client: k8s.ApiClient | None = None
         self._connected_cluster: dict | None = None
         self._ca_cert_path: str | None = None
+        
+        # API resources cache
+        self._api_resources_cache: list[dict[str, Any]] | None = None
+        self._api_resources_cache_time: float | None = None
+        self._cache_ttl: int = 300  # 5 minutes
     
     @property
     def is_connected(self) -> bool:
@@ -388,6 +393,9 @@ class K8sClient:
         self._config = None
         self._connected_cluster = None
         self._ca_cert_path = None
+        # Invalidate cache on disconnect
+        self._api_resources_cache = None
+        self._api_resources_cache_time = None
     
     def get_cluster_credentials(self) -> dict[str, str] | None:
         """Get current cluster credentials for Helm client.
@@ -427,9 +435,19 @@ class K8sClient:
     def list_api_resources(self) -> list[dict[str, Any]]:
         """List all available API resources (like kubectl api-resources).
         
+        Results are cached for 5 minutes to improve performance.
+        
         Returns:
             List of dicts with keys: name, namespaced, kind, apiGroup, apiVersion
         """
+        import time
+        
+        # Check cache validity
+        if self._api_resources_cache is not None and self._api_resources_cache_time is not None:
+            cache_age = time.time() - self._api_resources_cache_time
+            if cache_age < self._cache_ttl:
+                return self._api_resources_cache
+        
         resources = []
         
         try:
@@ -502,149 +520,164 @@ class K8sClient:
         
         # Sort by name
         resources.sort(key=lambda x: x['name'])
+        
+        # Update cache
+        self._api_resources_cache = resources
+        self._api_resources_cache_time = time.time()
+        
         return resources
     
     @auto_refresh_token
     def get_resources(self, kind: str, namespace: str | None = None, all_namespaces: bool = False) -> list[dict]:
-        """Get resources of any Kubernetes kind.
+        """Get resources of any Kubernetes kind using dynamic client.
         
         Args:
-            kind: Resource kind (e.g., 'pods', 'deployments', 'statefulsets')
+            kind: Resource kind (e.g., 'pods', 'deployments', 'ingressclasses')
             namespace: Specific namespace (optional)
             all_namespaces: List from all namespaces
             
         Returns:
             List of resource dicts with metadata and status_summary
         """
+        from kubernetes import dynamic
+        from kubernetes.client import api_client
+        
         kind_lower = kind.lower()
         
-        # Map kind to API method
-        api_methods = {
-            # Core API
-            'pods': (self.core_api, 'list_namespaced_pod', 'list_pod_for_all_namespaces'),
-            'services': (self.core_api, 'list_namespaced_service', 'list_service_for_all_namespaces'),
-            'configmaps': (self.core_api, 'list_namespaced_config_map', 'list_config_map_for_all_namespaces'),
-            'secrets': (self.core_api, 'list_namespaced_secret', 'list_secret_for_all_namespaces'),
-            'persistentvolumes': (self.core_api, 'list_persistent_volume', None),
-            'persistentvolumeclaims': (self.core_api, 'list_namespaced_persistent_volume_claim', 'list_persistent_volume_claim_for_all_namespaces'),
-            'nodes': (self.core_api, 'list_node', None),
-            'namespaces': (self.core_api, 'list_namespace', None),
-            'events': (self.core_api, 'list_namespaced_event', 'list_event_for_all_namespaces'),
-            'serviceaccounts': (self.core_api, 'list_namespaced_service_account', 'list_service_account_for_all_namespaces'),
-            
-            # Apps API
-            'deployments': (self.apps_api, 'list_namespaced_deployment', 'list_deployment_for_all_namespaces'),
-            'statefulsets': (self.apps_api, 'list_namespaced_stateful_set', 'list_stateful_set_for_all_namespaces'),
-            'daemonsets': (self.apps_api, 'list_namespaced_daemon_set', 'list_daemon_set_for_all_namespaces'),
-            'replicasets': (self.apps_api, 'list_namespaced_replica_set', 'list_replica_set_for_all_namespaces'),
-            
-            # Batch API
-            'jobs': (self.batch_api, 'list_namespaced_job', 'list_job_for_all_namespaces'),
-            'cronjobs': (self.batch_api, 'list_namespaced_cron_job', 'list_cron_job_for_all_namespaces'),
-            
-            # Networking API
-            'ingresses': (self.networking_api, 'list_namespaced_ingress', 'list_ingress_for_all_namespaces'),
-            'networkpolicies': (self.networking_api, 'list_namespaced_network_policy', 'list_network_policy_for_all_namespaces'),
-            
-            # RBAC API
-            'roles': (self.rbac_api, 'list_namespaced_role', 'list_role_for_all_namespaces'),
-            'rolebindings': (self.rbac_api, 'list_namespaced_role_binding', 'list_role_binding_for_all_namespaces'),
-            'clusterroles': (self.rbac_api, 'list_cluster_role', None),
-            'clusterrolebindings': (self.rbac_api, 'list_cluster_role_binding', None),
-            
-            # Autoscaling API
-            'horizontalpodautoscalers': (self.autoscaling_api, 'list_namespaced_horizontal_pod_autoscaler', 'list_horizontal_pod_autoscaler_for_all_namespaces'),
-        }
+        # Get API resource info for this kind
+        api_resources = self.list_api_resources()
+        resource_info = next((r for r in api_resources if r['name'] == kind_lower), None)
         
-        if kind_lower not in api_methods:
-            raise ValueError(f"Unsupported resource kind: {kind}. Use kubectl api-resources to see available kinds.")
+        if not resource_info:
+            raise ValueError(f"Resource kind '{kind}' not found. Use kubectl api-resources to see available kinds.")
         
-        api, namespaced_method, all_ns_method = api_methods[kind_lower]
+        # Create dynamic client
+        dyn_client = dynamic.DynamicClient(self._api_client)
         
-        # Determine which method to call
-        if all_namespaces and all_ns_method:
-            method = getattr(api, all_ns_method)
-            items = method().items
-        elif namespace and namespaced_method:
-            method = getattr(api, namespaced_method)
-            items = method(namespace).items
-        elif not namespace and not all_namespaces and namespaced_method:
-            # Default to 'default' namespace
-            method = getattr(api, namespaced_method)
-            items = method('default').items
-        else:
-            # Cluster-scoped resources
-            method = getattr(api, namespaced_method)
-            items = method().items
+        # Get API resource
+        api_version = f"{resource_info['apiGroup']}/{resource_info['apiVersion']}" if resource_info['apiGroup'] else resource_info['apiVersion']
+        api_resource = dyn_client.resources.get(
+            api_version=api_version,
+            kind=resource_info['kind']
+        )
+        
+        # Fetch resources
+        try:
+            if resource_info['namespaced']:
+                if all_namespaces or not namespace:
+                    # List from all namespaces
+                    resp = api_resource.get()
+                else:
+                    # List from specific namespace
+                    resp = api_resource.get(namespace=namespace)
+            else:
+                # Cluster-scoped resource
+                resp = api_resource.get()
+            
+            items = resp.items if hasattr(resp, 'items') else [resp]
+        except Exception as e:
+            raise RuntimeError(f"Failed to get {kind}: {e}")
         
         # Convert to dict format
         resources = []
         for item in items:
             metadata = item.metadata
+            
+            # Handle creationTimestamp - could be datetime or string
+            creation_ts = None
+            if hasattr(metadata, 'creationTimestamp') and metadata.creationTimestamp:
+                if isinstance(metadata.creationTimestamp, str):
+                    creation_ts = metadata.creationTimestamp
+                elif hasattr(metadata.creationTimestamp, 'isoformat'):
+                    creation_ts = metadata.creationTimestamp.isoformat()
+                else:
+                    creation_ts = str(metadata.creationTimestamp)
+            
             resource = {
                 'metadata': {
                     'name': metadata.name,
-                    'namespace': metadata.namespace,
-                    'creationTimestamp': metadata.creation_timestamp.isoformat() if metadata.creation_timestamp else None,
-                    'labels': metadata.labels or {},
-                    'annotations': metadata.annotations or {},
+                    'namespace': metadata.namespace if hasattr(metadata, 'namespace') else None,
+                    'creationTimestamp': creation_ts,
+                    'labels': dict(metadata.labels) if hasattr(metadata, 'labels') and metadata.labels else {},
+                    'annotations': dict(metadata.annotations) if hasattr(metadata, 'annotations') and metadata.annotations else {},
                 },
-                'status_summary': self._get_status_summary(item, kind_lower),
+                'status_summary': self._get_status_summary_dynamic(item, kind_lower),
             }
             resources.append(resource)
         
         return resources
     
-    def _get_status_summary(self, resource, kind: str) -> str:
-        """Get a summary status string for any resource."""
-        if kind == 'pods':
-            return self._pod_status(resource)
-        elif kind in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']:
-            if hasattr(resource, 'status') and resource.status:
-                if hasattr(resource.status, 'ready_replicas') and hasattr(resource.status, 'replicas'):
-                    ready = resource.status.ready_replicas or 0
-                    total = resource.status.replicas or 0
-                    return f"{ready}/{total}"
-                elif hasattr(resource.status, 'number_ready') and hasattr(resource.status, 'desired_number_scheduled'):
-                    ready = resource.status.number_ready or 0
-                    total = resource.status.desired_number_scheduled or 0
-                    return f"{ready}/{total}"
-            return "Unknown"
-        elif kind == 'services':
-            if hasattr(resource, 'spec') and resource.spec:
-                return resource.spec.type or "ClusterIP"
-            return "Unknown"
-        elif kind == 'ingresses':
-            if hasattr(resource, 'status') and resource.status and hasattr(resource.status, 'load_balancer'):
-                lb = resource.status.load_balancer
-                if lb and hasattr(lb, 'ingress') and lb.ingress:
-                    return lb.ingress[0].ip or lb.ingress[0].hostname or "Pending"
-            return "Pending"
-        elif kind == 'jobs':
-            if hasattr(resource, 'status') and resource.status:
-                succeeded = resource.status.succeeded or 0
-                failed = resource.status.failed or 0
-                if succeeded > 0:
-                    return "Complete"
-                elif failed > 0:
-                    return "Failed"
-                return "Running"
-            return "Unknown"
-        elif kind == 'cronjobs':
-            if hasattr(resource, 'spec') and resource.spec:
-                return f"Schedule: {resource.spec.schedule}"
-            return "Unknown"
-        else:
-            # Generic status
-            if hasattr(resource, 'status') and resource.status:
-                if hasattr(resource.status, 'phase'):
-                    return resource.status.phase
-                elif hasattr(resource.status, 'conditions') and resource.status.conditions:
-                    # Find Ready condition
-                    for cond in resource.status.conditions:
-                        if cond.type == 'Ready':
-                            return 'Ready' if cond.status == 'True' else 'NotReady'
+    def _get_status_summary_dynamic(self, resource, kind: str) -> str:
+        """Get a summary status string for any resource using dynamic client."""
+        # Try to get status from the resource
+        if not hasattr(resource, 'status') or not resource.status:
             return "Active"
+        
+        status = resource.status
+        
+        # Common status patterns
+        if kind == 'pods':
+            return self._pod_status_from_dict(resource)
+        elif kind in ['deployments', 'statefulsets', 'daemonsets', 'replicasets']:
+            if hasattr(status, 'readyReplicas') and hasattr(status, 'replicas'):
+                ready = status.readyReplicas or 0
+                total = status.replicas or 0
+                return f"{ready}/{total}"
+            elif hasattr(status, 'numberReady') and hasattr(status, 'desiredNumberScheduled'):
+                ready = status.numberReady or 0
+                total = status.desiredNumberScheduled or 0
+                return f"{ready}/{total}"
+        elif kind == 'services':
+            if hasattr(resource, 'spec') and resource.spec and hasattr(resource.spec, 'type'):
+                return resource.spec.type or "ClusterIP"
+        elif kind == 'ingresses' or kind == 'ingressclasses':
+            if hasattr(status, 'loadBalancer') and status.loadBalancer:
+                lb = status.loadBalancer
+                if hasattr(lb, 'ingress') and lb.ingress:
+                    ing = lb.ingress[0]
+                    return ing.ip or ing.hostname or "Pending"
+            return "Active"
+        elif kind == 'jobs':
+            if hasattr(status, 'succeeded') and status.succeeded and status.succeeded > 0:
+                return "Complete"
+            elif hasattr(status, 'failed') and status.failed and status.failed > 0:
+                return "Failed"
+            return "Running"
+        elif kind == 'cronjobs':
+            if hasattr(resource, 'spec') and resource.spec and hasattr(resource.spec, 'schedule'):
+                return f"Schedule: {resource.spec.schedule}"
+        
+        # Generic status - check phase or conditions
+        if hasattr(status, 'phase'):
+            return status.phase
+        elif hasattr(status, 'conditions') and status.conditions:
+            for cond in status.conditions:
+                if hasattr(cond, 'type') and cond.type == 'Ready':
+                    return 'Ready' if cond.status == 'True' else 'NotReady'
+        
+        return "Active"
+    
+    def _pod_status_from_dict(self, pod) -> str:
+        """Get pod status from dynamic client response."""
+        metadata = pod.metadata
+        status = pod.status
+        
+        if hasattr(metadata, 'deletionTimestamp') and metadata.deletionTimestamp:
+            return "Terminating"
+        
+        if hasattr(status, 'containerStatuses') and status.containerStatuses:
+            for cs in status.containerStatuses:
+                if hasattr(cs, 'state') and cs.state:
+                    state = cs.state
+                    if hasattr(state, 'waiting') and state.waiting:
+                        return state.waiting.reason or "Waiting"
+                    elif hasattr(state, 'terminated') and state.terminated:
+                        return state.terminated.reason or "Terminated"
+        
+        if hasattr(status, 'phase'):
+            return status.phase
+        
+        return "Unknown"
     
     # --- Pod Operations ---
     
