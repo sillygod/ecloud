@@ -43,6 +43,9 @@
 (declare-function ecloud-sql-list "ecloud-sql")
 (declare-function ecloud-gar-browse "ecloud-gar")
 (declare-function ecloud-ips-list "ecloud-ips")
+(declare-function ecloud-account-switch "ecloud-account-manager")
+(declare-function ecloud-account-list-processes "ecloud-account-manager")
+(declare-function ecloud-account-current "ecloud-account-manager")
 
 ;; Forward declarations for variables
 (defvar ecloud-k8s--current-cluster)
@@ -79,7 +82,14 @@ Signal an error with helpful instructions if not available."
 This is the unified entry point for all ECloud functionality.
 Select a service to access its features, or use individual
 ecloud-* commands directly for quick access."
-  ["Google Cloud Platform Services"
+  [:description
+   (lambda ()
+     (let ((current-account (when (fboundp 'ecloud-account-current)
+                             (ecloud-account-current))))
+       (if current-account
+           (format "Google Cloud Platform - Account: %s" (symbol-name current-account))
+         "Google Cloud Platform")))
+   :class transient-columns
    ["Storage & Data"
     ("b" "Browse GCS" ecloud-browse)
     ("s" "Cloud SQL" ecloud-sql-list)]
@@ -88,7 +98,10 @@ ecloud-* commands directly for quick access."
     ("k" "Kubernetes (GKE)" ecloud-k8s-menu)]
    ["Networking & Registry"
     ("i" "IP Addresses" ecloud-ips-list)
-    ("a" "Artifact Registry" ecloud-gar-browse)]]
+    ("a" "Artifact Registry" ecloud-gar-browse)]
+   ["Account Management"
+    ("A" "Switch Account" ecloud-account-switch)
+    ("L" "List Accounts" ecloud-account-list-processes)]]
   ["Actions"
    ("q" "Quit" transient-quit-one)])
 

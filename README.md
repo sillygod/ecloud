@@ -41,6 +41,87 @@ Backend 使用以下主要套件（透過 `uv` 自動安裝）：
   brew install docker
   ```
 
+## Multi-Account Support
+
+ECloud 支援同時管理多個 Google Cloud 帳號，每個帳號使用獨立的 service account 和 server process。這對於需要管理多個 GCP 專案或環境（如 staging、production）的使用者特別有用。
+
+### 配置多帳號
+
+在 `init.el` 中設定 `ecloud-accounts` 變數：
+
+```elisp
+(setq ecloud-accounts
+      '((staging . "/path/to/staging-service-account.json")
+        (production . "/path/to/production-service-account.json")
+        (dev . "/path/to/dev-service-account.json")))
+```
+
+### 帳號管理指令
+
+| 指令 | 說明 |
+|------|------|
+| `ecloud-account-switch` | 切換到指定帳號（自動啟動 server） |
+| `ecloud-account-list-processes` | 顯示所有帳號的狀態列表 |
+| `ecloud-account-connect` | 連線到指定帳號 |
+| `ecloud-account-disconnect` | 斷開指定帳號連線 |
+| `ecloud-account-restart` | 重啟指定帳號的 server |
+| `ecloud-account-stop-all` | 停止所有 server processes |
+| `ecloud-account-current` | 顯示當前活動帳號 |
+
+### 透過 Transient Menu 使用
+
+執行 `M-x ecloud` 開啟主選單，選擇：
+- `a` - 切換帳號
+- `A` - 查看帳號列表
+
+### 帳號狀態列表快捷鍵
+
+在帳號列表 buffer 中（`M-x ecloud-account-list-processes`）：
+
+| 按鍵 | 功能 |
+|------|------|
+| `RET` | 切換到該帳號 |
+| `c` | 連線帳號 |
+| `d` | 斷開帳號 |
+| `r` | 重啟帳號 |
+| `l` | 顯示 server 日誌 |
+| `g` | 重新整理列表 |
+| `q` | 關閉視窗 |
+
+> 如果您使用 **Evil mode**，上述按鍵在 `motion` state 下也支援。
+
+### 自動連線
+
+ECloud 會記住最後使用的帳號，並在下次啟動時自動連線：
+
+```elisp
+;; 啟用自動連線（預設）
+(setq ecloud-auto-connect-last-account t)
+
+;; 停用自動連線
+(setq ecloud-auto-connect-last-account nil)
+```
+
+### Port 配置
+
+預設 port range 為 8765-8774（支援最多 10 個帳號）。可自訂：
+
+```elisp
+(setq ecloud-port-range '(9000 . 9019))  ; 支援 20 個帳號
+```
+
+### 向後相容性
+
+如果未設定 `ecloud-accounts`，ECloud 會自動使用：
+1. `GOOGLE_APPLICATION_CREDENTIALS` 環境變數（建立 'default 帳號）
+2. 或現有的 `ecloud-server-url` 設定（建立 'external 帳號）
+
+這確保現有的單帳號配置無需修改即可繼續使用。
+
+### 詳細文件
+
+更多配置範例、遷移指南和進階用法，請參考 [MULTI_ACCOUNT_GUIDE.md](MULTI_ACCOUNT_GUIDE.md)。
+
 ## 快速開始
 
 ### 1. 設定 Service Account
@@ -188,6 +269,7 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (load-file "/yourpath/ecloud/emacs/ecloud-ws.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-commands.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-transient.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-account-manager.el")
 
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
@@ -582,6 +664,156 @@ gcloud iam service-accounts add-iam-policy-binding [SA_EMAIL] \
 | `ECLOUD_IMPERSONATE_SA` | 指定 SSH 用的 Impersonation SA | (選填，若未設定則讀取 JSON 檔) |
 
 ## 疑難排解
+
+### Multi-Account 相關問題
+
+#### 錯誤：Port allocation failed
+
+**原因**: 所有可用的 port 都已被使用，或 port pool 與系統狀態不同步
+
+**解決方法**:
+
+1. **檢查 port pool 狀態**：
+   ```elisp
+   ;; 載入除錯工具
+   (load-file "/yourpath/ecloud/emacs/ecloud-debug.el")
+   
+   ;; 檢查 port pool 和系統 port 使用情況
+   M-x ecloud-debug-check-port-pool
+   ```
+
+2. **如果發現 port pool 與系統不同步**：
+   ```elisp
+   ;; 停止所有 ECloud servers
+   M-x ecloud-account-stop-all
+   
+   ;; 重置 port pool
+   M-x ecloud-debug-reset-port-pool
+   
+   ;; 或手動重置
+   (setq ecloud-account--port-pool nil)
+   ```
+
+3. **增加 port range**：
+   ```elisp
+   (setq ecloud-port-range '(8765 . 8784))  ; 增加到 20 個 ports
+   ```
+
+4. **檢查系統 port 使用情況**：
+   ```bash
+   # macOS/Linux
+   lsof -i :8765-8774 -sTCP:LISTEN
+   
+   # 或檢查特定 port
+   lsof -i :8765
+   ```
+
+5. **停止佔用 port 的其他程式**：
+   ```bash
+   # 找出 PID
+   lsof -i :8765 | grep LISTEN
+   
+   # 終止程式
+   kill -9 <PID>
+   ```
+
+**常見原因**:
+- Port pool 沒有正確初始化
+- 之前的 server process 沒有正確清理
+- 其他程式（如手動啟動的 uvicorn）佔用了 port
+- Port pool 與系統狀態不同步
+
+**新功能**: 從此版本開始，ECloud 會自動檢查 port 是否真的可用（系統層面），而不只是檢查 pool 狀態。
+
+#### 錯誤：Service account file not found
+
+**原因**: 設定的 service account 檔案路徑不存在
+
+**解決方法**:
+1. 確認檔案路徑正確：
+   ```elisp
+   (setq ecloud-accounts
+         '((staging . "/absolute/path/to/service-account.json")))
+   ```
+2. 使用絕對路徑而非相對路徑
+3. 確認檔案權限可讀取：`chmod 600 /path/to/service-account.json`
+
+#### 錯誤：Server startup failed
+
+**原因**: Python server 無法啟動
+
+**解決方法**:
+1. 檢查 server 日誌：`M-x ecloud-account-show-process-buffer`
+2. 確認 Python 環境正確：
+   ```bash
+   cd /yourpath/ecloud/server
+   uv sync
+   ```
+3. 手動測試 server 啟動：
+   ```bash
+   GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json uv run uvicorn main:app --port 8765
+   ```
+
+#### 錯誤：Health check timeout
+
+**原因**: Server 啟動緩慢或無法回應
+
+**解決方法**:
+1. 檢查 Python 依賴是否完整安裝
+2. 確認防火牆未阻擋 localhost 連線
+3. 查看 server 日誌確認啟動狀態
+4. 增加 health check timeout（需修改程式碼）
+
+#### 帳號切換後 RPC 請求失敗
+
+**原因**: 新帳號的 server 尚未完全啟動，或 URL 解析有問題
+
+**解決方法**:
+
+1. 使用除錯工具檢查狀態：
+   ```elisp
+   ;; 載入除錯工具
+   (load-file "/yourpath/ecloud/emacs/ecloud-debug.el")
+   
+   ;; 顯示完整的除錯資訊
+   M-x ecloud-debug-show-current-state
+   
+   ;; 測試當前會使用的 URL
+   M-x ecloud-debug-test-rpc-url
+   ```
+
+2. 檢查帳號狀態：
+   ```elisp
+   M-x ecloud-account-list-processes
+   ```
+   確認 server 狀態為 'running'
+
+3. 查看 server 日誌確認無錯誤：
+   ```elisp
+   M-x ecloud-account-show-process-buffer
+   ```
+
+4. 如果問題持續，嘗試重啟帳號：
+   ```elisp
+   M-x ecloud-account-restart
+   ```
+
+**常見原因**:
+- Server 尚未完全啟動（等待幾秒後重試）
+- Health check 未通過
+- Service account 權限不足
+- URL 解析邏輯有問題（使用除錯工具確認）
+
+#### Mode-line 未顯示當前帳號
+
+**原因**: Mode-line 更新未觸發
+
+**解決方法**:
+1. 手動重新整理：`M-x force-mode-line-update`
+2. 重新載入 account manager：
+   ```elisp
+   (load-file "/yourpath/ecloud/emacs/ecloud-account-manager.el")
+   ```
 
 ### Helm 相關問題
 

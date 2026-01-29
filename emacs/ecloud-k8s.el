@@ -1208,7 +1208,7 @@ Similar to kubectl api-resources output."
 (defun ecloud-k8s-help ()
   "Show help for ecloud-k8s-mode."
   (interactive)
-  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [k]Kind [N]Filter [=]SetLimit [T]ToggleLimit [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
+  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [K]Kind [N]Filter [=]SetLimit [T]ToggleLimit [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
 
 (defun ecloud-k8s-helm-help ()
   "Show help for ecloud-helm-list-mode."
@@ -1226,7 +1226,7 @@ Similar to kubectl api-resources output."
     (define-key map (kbd "d") #'ecloud-k8s-switch-to-deployments)
     (define-key map (kbd "h") #'ecloud-k8s-helm-list)
     (define-key map (kbd "n") #'ecloud-k8s-switch-to-namespaces)
-    (define-key map (kbd "k") #'ecloud-k8s-view-kind)
+    (define-key map (kbd "K") #'ecloud-k8s-view-kind)
     (define-key map (kbd "N") #'ecloud-k8s-select-namespace)
     (define-key map (kbd "=") #'ecloud-k8s-set-pod-limit)
     (define-key map (kbd "T") #'ecloud-k8s-toggle-pod-limit)
@@ -1264,7 +1264,7 @@ Similar to kubectl api-resources output."
     (kbd "d") #'ecloud-k8s-switch-to-deployments
     (kbd "h") #'ecloud-k8s-helm-list
     (kbd "n") #'ecloud-k8s-switch-to-namespaces
-    (kbd "k") #'ecloud-k8s-view-kind
+    (kbd "K") #'ecloud-k8s-view-kind
     (kbd "N") #'ecloud-k8s-select-namespace
     (kbd "=") #'ecloud-k8s-set-pod-limit
     (kbd "T") #'ecloud-k8s-toggle-pod-limit

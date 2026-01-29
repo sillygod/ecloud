@@ -16,6 +16,10 @@
 (require 'url)
 (require 'url-http)
 
+;; Optional require for multi-account support
+;; Use require with error handling to maintain backward compatibility
+(require 'ecloud-account-manager nil t)
+
 ;;; User customization
 
 (defgroup ecloud-rpc nil
@@ -42,6 +46,31 @@
 (defun ecloud-rpc--next-id ()
   "Generate the next request ID."
   (cl-incf ecloud-rpc--request-id))
+
+(defun ecloud-rpc--get-current-url ()
+  "Get JSON-RPC URL for current active account.
+
+This function provides dynamic URL resolution for multi-account support.
+It checks if the account manager is available and returns the URL for
+the current active account. Falls back to `ecloud-server-url' for
+backward compatibility.
+
+Returns:
+  String - The JSON-RPC URL to use for requests
+
+Behavior:
+  1. If `ecloud-account-current' function exists and returns an account,
+     get the URL for that account using `ecloud-account--get-url'
+  2. Otherwise, return `ecloud-server-url' (single-account mode)
+
+This ensures backward compatibility when the account manager is not
+loaded or when no account is active."
+  (if (and (fboundp 'ecloud-account-current)
+           (fboundp 'ecloud-account--get-url)
+           (ecloud-account-current))
+      (or (ecloud-account--get-url (ecloud-account-current))
+          ecloud-server-url)
+    ecloud-server-url))
 
 (defun ecloud-rpc--build-request (method params)
   "Build a JSON-RPC 2.0 request for METHOD with PARAMS."
@@ -84,7 +113,13 @@ Returns the result on success, signals an error on failure."
   "Send a synchronous JSON-RPC request.
 METHOD is the method name (string).
 PARAMS is an optional plist of parameters.
-Returns the result on success, signals an error on failure."
+Returns the result on success, signals an error on failure.
+
+Connection Error Handling:
+If the request fails due to a connection error and the account manager
+is available, this function will attempt to restart the server and
+retry the request once. If the restart fails or the retry fails, the
+original error is signaled."
   (let* ((url-request-method "POST")
          (url-request-extra-headers
           '(("Content-Type" . "application/json")))
@@ -92,17 +127,61 @@ Returns the result on success, signals an error on failure."
          (url-request-data (encode-coding-string
                            (json-encode request)
                            'utf-8))
-         (buffer (condition-case err
-                     (url-retrieve-synchronously
-                      ecloud-server-url
-                      nil nil
-                      ecloud-request-timeout)
-                   (error
-                    (error "Failed to connect to ecloud server at %s: %s"
-                           ecloud-server-url (error-message-string err))))))
+         (server-url (ecloud-rpc--get-current-url))
+         (retry-count 0)
+         (max-retries 1)
+         (buffer nil)
+         (original-error nil))
+    
+    ;; Attempt the request with automatic retry on connection failure
+    (while (and (not buffer) (<= retry-count max-retries))
+      (condition-case err
+          (progn
+            (setq buffer (url-retrieve-synchronously
+                         server-url
+                         nil nil
+                         ecloud-request-timeout))
+            
+            ;; Check if buffer is nil (connection failed)
+            (unless buffer
+              (error "Failed to connect to ecloud server at %s. Please ensure the server is running"
+                     server-url)))
+        
+        (error
+         ;; Store the original error
+         (setq original-error err)
+         
+         ;; Try to handle the connection error if account manager is available
+         ;; and we haven't exceeded retry limit
+         (if (and (< retry-count max-retries)
+                  (fboundp 'ecloud-account--handle-connection-error))
+             (progn
+               ;; Attempt to restart the server
+               (condition-case restart-err
+                   (when (ecloud-account--handle-connection-error)
+                     ;; Restart successful, update server URL for retry
+                     (setq server-url (ecloud-rpc--get-current-url))
+                     ;; Increment retry count
+                     (setq retry-count (1+ retry-count))
+                     ;; Clear original error to allow retry
+                     (setq original-error nil))
+                 (error
+                  ;; Restart failed, increment retry count to exit loop
+                  (setq retry-count (1+ max-retries))
+                  (message "ECloud: Server restart failed: %s" 
+                           (error-message-string restart-err)))))
+           
+           ;; No account manager or already retried, increment to exit loop
+           (setq retry-count (1+ max-retries))))))
+    
+    ;; If we still don't have a buffer, signal the original error
     (unless buffer
-      (error "Failed to connect to ecloud server at %s. Please ensure the server is running"
-             ecloud-server-url))
+      (if original-error
+          (signal (car original-error) (cdr original-error))
+        (error "Failed to connect to ecloud server at %s. Please ensure the server is running"
+               server-url)))
+    
+    ;; Process the response
     (unwind-protect
         (with-current-buffer buffer
           ;; Skip HTTP headers
@@ -125,9 +204,10 @@ ERROR-CALLBACK is called with error message on failure."
          (request (ecloud-rpc--build-request method params))
          (url-request-data (encode-coding-string
                            (json-encode request)
-                           'utf-8)))
+                           'utf-8))
+         (server-url (ecloud-rpc--get-current-url)))
     (url-retrieve
-     ecloud-server-url
+     server-url
      (lambda (status callback error-callback)
        (if-let ((err (plist-get status :error)))
            (if error-callback
