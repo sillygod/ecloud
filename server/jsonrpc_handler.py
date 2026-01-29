@@ -1161,9 +1161,10 @@ class JsonRpcHandler:
         """List Helm releases."""
         namespace = params.get("namespace")
         all_namespaces = params.get("all_namespaces", False)
+        fetch_details = params.get("fetch_details", True)  # Default to True for backward compatibility
         
         client = self._get_helm_client()
-        releases = await client.list_releases(namespace, all_namespaces)
+        releases = await client.list_releases(namespace, all_namespaces, fetch_details)
         return {
             "releases": releases,
             "count": len(releases),

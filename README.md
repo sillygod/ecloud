@@ -459,6 +459,73 @@ Q  Quit
 
 ECloud 整合了 Kubernetes Helm 套件管理功能，讓您在 Emacs 中完整管理 Helm releases。
 
+### 效能優化
+
+#### 快速模式（推薦）
+
+如果您有大量 Helm releases（> 20 個），可以使用**快速模式**來大幅提升載入速度：
+
+```elisp
+;; 切換快速模式（在 Helm releases buffer 中）
+M-x ecloud-k8s-helm-toggle-details
+
+;; 或在 init.el 中永久設定
+(setq ecloud-k8s-helm-fetch-details nil)  ; 快速模式（預設為 t）
+```
+
+**效能對比**（44 個 releases）:
+- **快速模式** (`fetch-details=nil`): < 1 秒 - 只顯示 name 和 namespace
+- **完整模式** (`fetch-details=t`): 2-13 秒 - 顯示 chart, version, status
+
+在快速模式下，chart/version/status 欄位會顯示 "..."，但您仍然可以按 `RET` 查看任何 release 的完整詳情。
+
+#### Namespace Filter
+
+從 K8s Pod list 按 `h` 切換到 Helm list 時，會自動使用當前的 namespace filter。這可以大幅減少載入時間：
+
+- **單一 namespace**: 通常 < 1 秒
+- **所有 namespaces**: 視 release 數量而定
+
+#### 進度顯示
+
+當獲取大量 releases 時（> 2 秒），會顯示進度訊息。
+
+#### Backend 並行優化
+
+Backend 使用並行請求獲取 release 詳細資訊：
+- 預設最多 20 個並行請求（可調整）
+- 自動處理失敗的 releases，不會阻擋整體載入
+
+**調整並行數**（如果完整模式載入很慢）:
+
+```bash
+# 在啟動 server 前設定環境變數
+export HELM_CONCURRENT_REQUESTS=30  # 增加到 30（適合強大的 cluster）
+export HELM_CONCURRENT_REQUESTS=10  # 減少到 10（適合較弱的 cluster）
+
+# 然後啟動 server
+cd server
+uv run uvicorn main:app --port 8765
+```
+
+或在 Emacs 中設定（需要重啟 server）:
+
+```elisp
+;; 在啟動 server 前設定
+(setenv "HELM_CONCURRENT_REQUESTS" "30")
+```
+
+**效能基準**（44 個 releases，完整模式）:
+- **理想情況**: 2-4 秒（並行數 20-30）
+- **如果 > 10 秒**: 可能是網路延遲或 cluster 回應慢，嘗試增加並行數或使用快速模式
+- **如果出現錯誤**: 減少並行數到 10 或更低
+
+**建議**:
+- **優先使用快速模式** - 對大多數使用情境已足夠
+- 使用 namespace filter (`N`) 來限制範圍
+- 如果有很多 releases，考慮按 namespace 分別查看
+- 檢查 server logs 查看詳細的時間分析（參考 `diagnose-helm-performance.md`）
+
 ### 啟動 Helm 管理
 
 有三種方式進入 Helm 管理介面：

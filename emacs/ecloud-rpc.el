@@ -748,11 +748,15 @@ LIMIT can be used to restrict the number of pods returned for performance."
     (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
     (ecloud-rpc-request "helm_list_releases" params)))
 
-(defun ecloud-rpc-helm-list-releases-async (callback &optional namespace all-namespaces error-callback)
-  "List Helm releases asynchronously."
+(defun ecloud-rpc-helm-list-releases-async (callback &optional namespace all-namespaces fetch-details error-callback)
+  "List Helm releases asynchronously.
+FETCH-DETAILS controls whether to fetch detailed info (chart, version, status).
+Set to nil for faster listing with basic info only."
   (let ((params nil))
     (when namespace (setq params (plist-put params :namespace namespace)))
     (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (when (not (eq fetch-details 'unspecified))
+      (setq params (plist-put params :fetch_details (if fetch-details t :json-false))))
     (ecloud-rpc-request-async "helm_list_releases" callback params error-callback)))
 
 (defun ecloud-rpc-helm-get-release-details (name &optional namespace)

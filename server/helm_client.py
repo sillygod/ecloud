@@ -294,20 +294,29 @@ class HelmClient:
     async def list_releases(
         self,
         namespace: str | None = None,
-        all_namespaces: bool = False
+        all_namespaces: bool = False,
+        fetch_details: bool = True
     ) -> list[dict[str, Any]]:
         """List Helm releases.
         
         Args:
             namespace: Target namespace (optional)
             all_namespaces: List releases from all namespaces
+            fetch_details: Whether to fetch detailed info (chart, version, status).
+                          Set to False for faster listing with basic info only.
         
         Returns:
             List of release dicts with keys: name, namespace, chart, version, status
+            If fetch_details=False, only name and namespace are guaranteed.
         """
         self._ensure_initialized()
         
         try:
+            import asyncio
+            import time
+            
+            start_time = time.time()
+            
             # List releases using pyhelm3
             # pyhelm3's list_releases returns a generator of Release objects (name + namespace only)
             releases_generator = await self._client.list_releases(
@@ -317,17 +326,48 @@ class HelmClient:
             
             # Convert generator to list
             releases = list(releases_generator)
+            list_time = time.time() - start_time
+            print(f"Listed {len(releases)} releases in {list_time:.2f}s")
+            
+            if not releases:
+                return []
+            
+            # If fetch_details is False, return basic info only (much faster)
+            if not fetch_details:
+                print(f"Returning basic info only (fetch_details=False)")
+                return [
+                    {
+                        "name": release.name,
+                        "namespace": release.namespace,
+                        "chart": "...",  # Placeholder
+                        "version": "...",
+                        "status": "...",
+                        "revision": 0,
+                        "updated": datetime.now().isoformat(),
+                        "appVersion": None,
+                    }
+                    for release in releases
+                ]
             
             # For each release, get the current revision to get detailed info
             # Use asyncio.gather to fetch all revisions concurrently for better performance
             async def get_release_info(release):
                 """Get detailed info for a single release."""
+                release_start = time.time()
                 try:
                     # Get current revision which has all the details
+                    rev_start = time.time()
                     revision = await release.current_revision()
+                    rev_time = time.time() - rev_start
                     
                     # Extract chart metadata
+                    meta_start = time.time()
                     chart_metadata = await revision.chart_metadata()
+                    meta_time = time.time() - meta_start
+                    
+                    total_time = time.time() - release_start
+                    if total_time > 0.5:  # Log slow releases
+                        print(f"  Slow release {release.name}: revision={rev_time:.2f}s, metadata={meta_time:.2f}s, total={total_time:.2f}s")
                     
                     return {
                         "name": release.name,
@@ -355,9 +395,24 @@ class HelmClient:
                         "appVersion": None,
                     }
             
-            # Fetch all release info concurrently
-            import asyncio
-            result = await asyncio.gather(*[get_release_info(release) for release in releases])
+            # Increase concurrent requests for better performance
+            # Most K8s clusters can handle 20-30 concurrent requests easily
+            # Can be configured via HELM_CONCURRENT_REQUESTS environment variable
+            import os
+            max_concurrent = int(os.getenv('HELM_CONCURRENT_REQUESTS', '20'))
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def get_release_info_with_limit(release):
+                async with semaphore:
+                    return await get_release_info(release)
+            
+            # Process all releases concurrently
+            fetch_start = time.time()
+            result = await asyncio.gather(*[get_release_info_with_limit(release) for release in releases])
+            fetch_time = time.time() - fetch_start
+            
+            total_time = time.time() - start_time
+            print(f"Fetched details for {len(result)} releases in {fetch_time:.2f}s (total: {total_time:.2f}s, concurrency: {max_concurrent})")
             
             return list(result)
             

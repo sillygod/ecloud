@@ -31,6 +31,14 @@ setting a limit improves performance significantly."
   :type 'integer
   :group 'ecloud-k8s)
 
+(defcustom ecloud-k8s-helm-fetch-details t
+  "Whether to fetch detailed info for Helm releases.
+When t, fetches chart name, version, and status for each release (slower).
+When nil, only fetches release name and namespace (much faster).
+You can toggle this with `ecloud-k8s-helm-toggle-details'."
+  :type 'boolean
+  :group 'ecloud-k8s)
+
 (defface ecloud-k8s-name-face
   '((t :inherit font-lock-function-name-face :weight bold))
   "Face for resource names."
@@ -392,27 +400,57 @@ Parses structured error messages and displays them appropriately."
 ;;; Helm Releases
 
 (defun ecloud-k8s--fetch-helm-releases ()
-  "Fetch and display Helm releases."
-  (let ((buffer (get-buffer-create "*ECloud-Helm-Releases*")))
+  "Fetch and display Helm releases.
+Uses the current namespace filter if set, otherwise fetches from all namespaces."
+  (let ((buffer (get-buffer-create "*ECloud-Helm-Releases*"))
+        (namespace ecloud-k8s--current-namespace))
     (with-current-buffer buffer
       (ecloud-helm-list-mode)
       (setq ecloud-k8s--current-view 'helm-releases)
       (setq tabulated-list-entries nil)
       (tabulated-list-print t)
-      (message "Fetching Helm releases...")
-      (let ((buffer (current-buffer)))
+      ;; Show which namespace we're fetching from
+      (if namespace
+          (message "Fetching Helm releases from namespace '%s'..." namespace)
+        (message "Fetching Helm releases from all namespaces (this may take a while)..."))
+      (let ((buffer (current-buffer))
+            (start-time (current-time))
+            (progress-timer nil))
+        ;; Show progress every 2 seconds for long operations
+        (setq progress-timer
+              (run-at-time 2 2
+                          (lambda ()
+                            (let ((elapsed (float-time (time-subtract (current-time) start-time))))
+                              (if namespace
+                                  (message "Still fetching Helm releases from '%s'... (%.1fs elapsed)"
+                                          namespace elapsed)
+                                (message "Still fetching Helm releases from all namespaces... (%.1fs elapsed)"
+                                        elapsed))))))
         (ecloud-rpc-helm-list-releases-async
          (lambda (resp)
-           (let ((releases (plist-get resp :releases)))
+           ;; Cancel progress timer
+           (when progress-timer
+             (cancel-timer progress-timer))
+           (let* ((releases (plist-get resp :releases))
+                  (elapsed (float-time (time-subtract (current-time) start-time))))
              (when (buffer-live-p buffer)
                (with-current-buffer buffer
                  (setq tabulated-list-entries
                        (mapcar #'ecloud-k8s--helm-release-to-entry releases))
                  (tabulated-list-print)
-                 (message "Found %d Helm releases." (length releases))))))
-         ecloud-k8s--current-namespace
-         (not ecloud-k8s--current-namespace)  ; all-namespaces when no namespace filter
-         (lambda (err) (ecloud-k8s--display-error err "Failed to fetch Helm releases"))))
+                 (if namespace
+                     (message "Found %d Helm releases in namespace '%s' (%.2fs)."
+                             (length releases) namespace elapsed)
+                   (message "Found %d Helm releases across all namespaces (%.2fs)."
+                           (length releases) elapsed))))))
+         namespace  ; Use current namespace filter
+         nil        ; Don't fetch all namespaces if namespace is set
+         ecloud-k8s-helm-fetch-details  ; Use customizable variable
+         (lambda (err)
+           ;; Cancel progress timer on error
+           (when progress-timer
+             (cancel-timer progress-timer))
+           (ecloud-k8s--display-error err "Failed to fetch Helm releases"))))
     (switch-to-buffer buffer))))
 
 (defun ecloud-k8s--helm-release-to-entry (release)
@@ -421,9 +459,20 @@ Parses structured error messages and displays them appropriately."
         (vector
          (propertize (or (plist-get release :name) "???") 'face 'ecloud-k8s-name-face)
          (propertize (or (plist-get release :namespace) "???") 'face 'ecloud-k8s-namespace-face)
-         (or (plist-get release :chart) "")
-         (or (plist-get release :version) "")
-         (ecloud-k8s--format-status (or (plist-get release :status) "")))))
+         (or (plist-get release :chart) "...")
+         (or (plist-get release :version) "...")
+         (ecloud-k8s--format-status (or (plist-get release :status) "...")))))
+
+(defun ecloud-k8s-helm-toggle-details ()
+  "Toggle between fast mode (basic info) and full mode (detailed info) for Helm releases.
+Fast mode only shows release name and namespace.
+Full mode also shows chart, version, and status (slower)."
+  (interactive)
+  (setq ecloud-k8s-helm-fetch-details (not ecloud-k8s-helm-fetch-details))
+  (message "Helm fetch details: %s (refresh to apply)" 
+           (if ecloud-k8s-helm-fetch-details "enabled" "disabled"))
+  (when (eq ecloud-k8s--current-view 'helm-releases)
+    (ecloud-k8s-refresh)))
 
 (defun ecloud-k8s-helm-list ()
   "List Helm releases in current cluster."
