@@ -1,6 +1,6 @@
 # ECloud - Emacs Google Cloud Manager
 
-透過 Emacs 直接管理 Google Cloud Platform (GCP) 資源，包含 Storage, Compute Engine, SQL 與 Artifact Registry。使用 JSON-RPC 與 FastAPI server 溝通。
+透過 Emacs 直接管理 Google Cloud Platform (GCP) 資源，包含 Storage, Compute Engine, Cloud Run, Cloud Scheduler, SQL 與 Artifact Registry。使用 JSON-RPC 與 FastAPI server 溝通。
 
 ## 需求
 
@@ -19,6 +19,9 @@ Backend 使用以下主要套件（透過 `uv` 自動安裝）：
 - `uvicorn` - ASGI server
 - `google-cloud-storage` - GCS 操作
 - `google-cloud-compute` - Compute Engine 管理
+- `google-cloud-run` - Cloud Run 服務管理
+- `google-cloud-logging` - Cloud Logging (用於 Cloud Run 日誌)
+- `google-cloud-scheduler` - Cloud Scheduler 定時任務管理
 - `google-cloud-sql-connector` - Cloud SQL 連線
 - `kubernetes` - K8s API 操作
 - `pyhelm3` - Helm 3 操作
@@ -142,6 +145,8 @@ ECloud 會記住最後使用的帳號，並在下次啟動時自動連線：
 |------|---------|
 | **GCS (Storage)** | `Storage Admin` 或 `Storage Object Admin` |
 | **Compute Engine** | `Compute Admin` 或 `Compute Instance Admin` |
+| **Cloud Run** | `Cloud Run Admin` 或 `Cloud Run Developer` |
+| **Cloud Scheduler** | `Cloud Scheduler Admin` |
 | **Cloud SQL** | `Cloud SQL Admin` 或 `Cloud SQL Client` |
 | **Kubernetes (GKE)** | `Kubernetes Engine Admin` 或 `Kubernetes Engine Developer` |
 | **Artifact Registry** | `Artifact Registry Administrator` 或 `Artifact Registry Reader` |
@@ -150,10 +155,13 @@ ECloud 會記住最後使用的帳號，並在下次啟動時自動連線：
 **推薦設定（完整功能）**：
 - `Storage Admin` - 管理 GCS buckets 和物件
 - `Compute Admin` - 管理 VM 實例和 SSH
+- `Cloud Run Admin` - 管理 Cloud Run 服務和部署
+- `Cloud Scheduler Admin` - 管理定時任務
 - `Cloud SQL Admin` - 管理 SQL 實例和資料庫
 - `Kubernetes Engine Admin` - 管理 GKE clusters 和資源
 - `Artifact Registry Administrator` - 管理 Docker images
 - `Compute Network Admin` - 管理靜態 IP
+- `Logging Viewer` - 查看 Cloud Run 日誌
 
 #### Helm 特定權限
 
@@ -266,6 +274,9 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (load-file "/yourpath/ecloud/emacs/ecloud-rpc.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-compute.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-k8s.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-scheduler.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-cloud-run.el")
+(load-file "/yourpath/ecloud/emacs/ecloud-notify.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-ws.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-commands.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-transient.el")
@@ -308,7 +319,7 @@ ECloud 提供統一的 Transient Menu 介面，讓您快速存取所有功能：
 
 從主選單可以導航到：
 - **Storage & Data**: GCS Browser, Cloud SQL
-- **Compute & Containers**: Compute Engine, Kubernetes (GKE)
+- **Compute & Containers**: Compute Engine, Cloud Run, Cloud Scheduler, Kubernetes (GKE)
 - **Networking & Registry**: IP Addresses, Artifact Registry
 
 #### 傳統指令 (向後相容)
@@ -319,6 +330,8 @@ ECloud 提供統一的 Transient Menu 介面，讓您快速存取所有功能：
 - `M-x ecloud-server-status` - 檢查 server 連線
 - `M-x ecloud-ips-list` - 管理靜態 IP
 - `M-x ecloud-compute-list` - 管理 VM 實例與 SSH
+- `M-x ecloud-cloud-run-list` - 管理 Cloud Run 服務
+- `M-x ecloud-scheduler-list` - 管理 Cloud Scheduler 定時任務
 - `M-x ecloud-sql-list` - 管理 Cloud SQL 與 Proxy
 - `M-x ecloud-k8s-list` - 管理 GKE Clusters 與 K8s 資源
 - `M-x ecloud-k8s-helm-list` - 管理 Helm Releases
@@ -642,10 +655,97 @@ Helm 操作使用與 K8s 相同的認證機制：
 | `D u` | 刪除使用者 |
 | `r` | 重新整理 |
 
+## Cloud Run
+
+使用 `M-x ecloud-cloud-run-list` 管理 Cloud Run 服務。支援服務部署、日誌查看和流量管理。
+
+| 按鍵 | 功能 |
+|------|------|
+| `RET` | 查看服務詳情 |
+| `l` | 查看服務日誌 |
+| `d` | 部署新服務或更新現有服務 |
+| `D` | 刪除服務 |
+| `R` | 切換區域 |
+| `o` | 在瀏覽器中開啟服務 URL |
+| `r` / `g` | 重新整理列表 |
+| `q` | 關閉視窗 |
+
+### Cloud Run 功能特色
+
+- **服務管理**: 列出、查看、部署和刪除 Cloud Run 服務
+- **日誌查看**: 直接從 Emacs 查看 Cloud Logging 日誌，支援嚴重性過濾
+- **多區域支持**: 輕鬆切換不同 GCP 區域
+- **部署配置**: 設定 CPU、記憶體、實例數量、環境變數等
+- **即時更新**: 透過 WebSocket 接收部署和刪除事件通知
+- **URL 快速開啟**: 一鍵在瀏覽器中開啟服務
+
+### 部署 Cloud Run 服務
+
+執行 `d` 鍵或 `M-x ecloud-cloud-run-deploy`，系統會提示輸入：
+
+- **Service name**: 服務名稱
+- **Container image**: 容器映像 URL (例如從 Artifact Registry)
+- **Region**: 部署區域
+- **Port**: 容器監聽埠號 (預設 8080)
+- **CPU**: CPU 限制 (例如 "1", "2")
+- **Memory**: 記憶體限制 (例如 "512Mi", "1Gi")
+- **Min/Max instances**: 自動擴展範圍
+- **Allow unauthenticated**: 是否允許未認證存取
+
+## Cloud Scheduler
+
+使用 `M-x ecloud-scheduler-list` 管理 Cloud Scheduler 定時任務。支援 HTTP、Pub/Sub 和 App Engine 目標。
+
+| 按鍵 | 功能 |
+|------|------|
+| `RET` | 查看任務詳情 |
+| `c` | 建立新的 HTTP 任務 |
+| `p` | 暫停任務 |
+| `P` | 恢復任務 |
+| `R` | 立即執行任務 |
+| `D` | 刪除任務 |
+| `L` | 切換位置 |
+| `r` / `g` | 重新整理列表 |
+| `q` | 關閉視窗 |
+
+### Cloud Scheduler 功能特色
+
+- **任務管理**: 列出、查看、建立和刪除定時任務
+- **Cron 排程**: 使用標準 Cron 語法設定執行時間
+- **多種目標**: 支援 HTTP、Pub/Sub、App Engine
+- **暫停/恢復**: 臨時停用任務而不刪除
+- **手動觸發**: 立即執行任務進行測試
+- **重試配置**: 自動重試失敗的任務
+- **時區支持**: 設定任務執行的時區
+
+### 建立 HTTP 任務
+
+執行 `c` 鍵或 `M-x ecloud-scheduler-create-http-job`，系統會提示輸入：
+
+- **Job name**: 任務名稱
+- **Cron schedule**: Cron 表達式（例如：`0 9 * * *` 表示每天早上 9 點）
+- **Target URI**: 目標 HTTP URL
+- **Location**: 部署位置
+- **Description**: 任務描述（可選）
+- **Timezone**: 時區（預設：UTC）
+- **HTTP method**: HTTP 方法（GET、POST 等）
+
+### Cron 表達式範例
+
+```
+0 9 * * *       # 每天早上 9:00
+*/15 * * * *    # 每 15 分鐘
+0 0 * * 0       # 每週日午夜
+0 0 1 * *       # 每月 1 號午夜
+0 */6 * * *     # 每 6 小時
+```
+
 ## Real-time Updates (WebSockets)
 
 支援透過 WebSocket 進行即時狀態更新：
 - **K8s Logs**: 支援即時 Log Streaming。
+- **Cloud Run**: 部署和刪除服務時即時更新列表。
+- **Cloud Scheduler**: 建立、暫停、恢復、刪除任務時即時更新列表。
 - **Cloud SQL Proxy**: 啟動/停止時即時更新列表狀態 (Proxy Column)。
 - **GCS**: 上傳/下載/刪除動作完成後，自動重新整理檔案列表。
 - **GAR**: Docker Pull/Push 或刪除動作完成後，自動重新整理列表。

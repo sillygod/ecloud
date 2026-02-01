@@ -43,6 +43,8 @@
 (declare-function ecloud-sql-list "ecloud-sql")
 (declare-function ecloud-gar-browse "ecloud-gar")
 (declare-function ecloud-ips-list "ecloud-ips")
+(declare-function ecloud-cloud-run-list "ecloud-cloud-run")
+(declare-function ecloud-scheduler-list "ecloud-scheduler")
 (declare-function ecloud-account-switch "ecloud-account-manager")
 (declare-function ecloud-account-list-processes "ecloud-account-manager")
 (declare-function ecloud-account-current "ecloud-account-manager")
@@ -95,7 +97,9 @@ ecloud-* commands directly for quick access."
     ("s" "Cloud SQL" ecloud-sql-list)]
    ["Compute & Containers"
     ("c" "Compute Engine" ecloud-compute-list)
-    ("k" "Kubernetes (GKE)" ecloud-k8s-menu)]
+    ("k" "Kubernetes (GKE)" ecloud-k8s-menu)
+    ("r" "Cloud Run" ecloud-cloud-run-list)
+    ("S" "Cloud Scheduler" ecloud-scheduler-list)]
    ["Networking & Registry"
     ("i" "IP Addresses" ecloud-ips-list)
     ("a" "Artifact Registry" ecloud-gar-browse)]

@@ -18,6 +18,8 @@ from sql_proxy import get_proxy_manager, SQLProxyManager
 from k8s_client import get_k8s_client, K8sClient
 from k8s_log_streamer import get_log_streamer, K8sLogStreamer
 from helm_client import get_helm_client, HelmClient, reset_helm_client
+from cloud_run_client import get_cloud_run_client, CloudRunClient
+from cloud_scheduler_client import get_cloud_scheduler_client, CloudSchedulerClient
 from config import config
 from websocket_manager import get_manager
 from error_handler import (
@@ -42,6 +44,8 @@ GAR_ERROR = -32003
 COMPUTE_ERROR = -32004
 K8S_ERROR = -32005
 HELM_ERROR = -32006
+CLOUD_RUN_ERROR = -32007
+CLOUD_SCHEDULER_ERROR = -32008
 
 
 class JsonRpcRequest(BaseModel):
@@ -159,6 +163,25 @@ class JsonRpcHandler:
             "helm_add_repository": self._helm_add_repository,
             "helm_remove_repository": self._helm_remove_repository,
             "helm_search_charts": self._helm_search_charts,
+            # Cloud Run methods
+            "cloud_run_list_regions": self._cloud_run_list_regions,
+            "cloud_run_list_services": self._cloud_run_list_services,
+            "cloud_run_get_service": self._cloud_run_get_service,
+            "cloud_run_list_revisions": self._cloud_run_list_revisions,
+            "cloud_run_delete_service": self._cloud_run_delete_service,
+            "cloud_run_get_logs": self._cloud_run_get_logs,
+            "cloud_run_deploy_service": self._cloud_run_deploy_service,
+            # Cloud Scheduler methods
+            "cloud_scheduler_list_locations": self._cloud_scheduler_list_locations,
+            "cloud_scheduler_list_jobs": self._cloud_scheduler_list_jobs,
+            "cloud_scheduler_get_job": self._cloud_scheduler_get_job,
+            "cloud_scheduler_create_http_job": self._cloud_scheduler_create_http_job,
+            "cloud_scheduler_create_pubsub_job": self._cloud_scheduler_create_pubsub_job,
+            "cloud_scheduler_update_job": self._cloud_scheduler_update_job,
+            "cloud_scheduler_pause_job": self._cloud_scheduler_pause_job,
+            "cloud_scheduler_resume_job": self._cloud_scheduler_resume_job,
+            "cloud_scheduler_run_job": self._cloud_scheduler_run_job,
+            "cloud_scheduler_delete_job": self._cloud_scheduler_delete_job,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
@@ -1360,6 +1383,395 @@ class JsonRpcHandler:
             "charts": charts,
             "count": len(charts),
         }
+
+    # ===== Cloud Run Methods =====
+
+    def _get_cloud_run_client(self) -> CloudRunClient:
+        """Get or create Cloud Run client."""
+        return get_cloud_run_client()
+
+    def _cloud_run_list_regions(self, params: dict) -> dict:
+        """List available Cloud Run regions."""
+        try:
+            client = self._get_cloud_run_client()
+            regions = client.list_regions()
+            return {"regions": regions}
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to list regions: {e}")
+
+    def _cloud_run_list_services(self, params: dict) -> dict:
+        """List Cloud Run services in a region or all regions."""
+        region = params.get("region", "us-central1")
+        all_regions = params.get("all_regions", False)
+        
+        try:
+            client = self._get_cloud_run_client()
+            services = client.list_services(region=region, all_regions=all_regions)
+            return {
+                "services": [s.to_dict() for s in services],
+                "count": len(services),
+            }
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to list services: {e}")
+
+    def _cloud_run_get_service(self, params: dict) -> dict:
+        """Get details of a specific Cloud Run service."""
+        name = params.get("name")
+        region = params.get("region", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_run_client()
+            service = client.get_service(name, region)
+            return {"service": service.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to get service '{name}': {e}")
+
+    def _cloud_run_list_revisions(self, params: dict) -> dict:
+        """List revisions for a Cloud Run service."""
+        service_name = params.get("service_name")
+        region = params.get("region", "us-central1")
+        
+        if not service_name:
+            raise TypeError("Missing required parameter: service_name")
+        
+        try:
+            client = self._get_cloud_run_client()
+            revisions = client.list_revisions(service_name, region)
+            return {
+                "revisions": [r.to_dict() for r in revisions],
+                "count": len(revisions),
+            }
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to list revisions: {e}")
+
+    async def _cloud_run_delete_service(self, params: dict) -> dict:
+        """Delete a Cloud Run service."""
+        name = params.get("name")
+        region = params.get("region", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_run_client()
+            success = client.delete_service(name, region)
+            
+            # Broadcast service deleted
+            await get_manager().broadcast({
+                "type": "cloud_run_service_deleted",
+                "data": {"name": name, "region": region}
+            })
+            
+            return {"success": success}
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to delete service '{name}': {e}")
+
+    def _cloud_run_get_logs(self, params: dict) -> dict:
+        """Get logs for a Cloud Run service."""
+        service_name = params.get("service_name")
+        region = params.get("region", "us-central1")
+        limit = params.get("limit", 100)
+        severity = params.get("severity")
+        
+        if not service_name:
+            raise TypeError("Missing required parameter: service_name")
+        
+        try:
+            client = self._get_cloud_run_client()
+            logs = client.get_logs(service_name, region, limit, severity)
+            return {
+                "logs": logs,
+                "count": len(logs),
+            }
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to get logs: {e}")
+
+    async def _cloud_run_deploy_service(self, params: dict) -> dict:
+        """Deploy a new Cloud Run service or update existing one."""
+        name = params.get("name")
+        image = params.get("image")
+        region = params.get("region", "us-central1")
+        port = params.get("port", 8080)
+        env_vars = params.get("env_vars")
+        cpu = params.get("cpu", "1")
+        memory = params.get("memory", "512Mi")
+        min_instances = params.get("min_instances", 0)
+        max_instances = params.get("max_instances", 100)
+        allow_unauthenticated = params.get("allow_unauthenticated", True)
+        
+        if not name or not image:
+            raise TypeError("Missing required parameters: name, image")
+        
+        try:
+            client = self._get_cloud_run_client()
+            service = client.deploy_service(
+                name=name,
+                image=image,
+                region=region,
+                port=port,
+                env_vars=env_vars,
+                cpu=cpu,
+                memory=memory,
+                min_instances=min_instances,
+                max_instances=max_instances,
+                allow_unauthenticated=allow_unauthenticated,
+            )
+            
+            # Broadcast service deployed
+            await get_manager().broadcast({
+                "type": "cloud_run_service_deployed",
+                "data": {"name": name, "region": region, "image": image}
+            })
+            
+            return {"service": service.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudRunError: Failed to deploy service '{name}': {e}")
+
+    # ===== Cloud Scheduler Methods =====
+
+    def _get_cloud_scheduler_client(self) -> CloudSchedulerClient:
+        """Get or create Cloud Scheduler client."""
+        return get_cloud_scheduler_client()
+
+    def _cloud_scheduler_list_locations(self, params: dict) -> dict:
+        """List available Cloud Scheduler locations."""
+        try:
+            client = self._get_cloud_scheduler_client()
+            locations = client.list_locations()
+            return {"locations": locations}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to list locations: {e}")
+
+    def _cloud_scheduler_list_jobs(self, params: dict) -> dict:
+        """List Cloud Scheduler jobs in a location."""
+        location = params.get("location", "us-central1")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            jobs = client.list_jobs(location)
+            return {
+                "jobs": [j.to_dict() for j in jobs],
+                "count": len(jobs),
+            }
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to list jobs: {e}")
+
+    def _cloud_scheduler_get_job(self, params: dict) -> dict:
+        """Get details of a specific Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            job = client.get_job(name, location)
+            return {"job": job.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to get job '{name}': {e}")
+
+    async def _cloud_scheduler_create_http_job(self, params: dict) -> dict:
+        """Create a new HTTP Cloud Scheduler job."""
+        name = params.get("name")
+        schedule = params.get("schedule")
+        uri = params.get("uri")
+        location = params.get("location", "us-central1")
+        description = params.get("description", "")
+        timezone = params.get("timezone", "UTC")
+        http_method = params.get("http_method", "POST")
+        headers = params.get("headers")
+        body = params.get("body", "")
+        retry_count = params.get("retry_count", 3)
+        
+        if not name or not schedule or not uri:
+            raise TypeError("Missing required parameters: name, schedule, uri")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            job = client.create_http_job(
+                name=name,
+                schedule=schedule,
+                uri=uri,
+                location=location,
+                description=description,
+                timezone=timezone,
+                http_method=http_method,
+                headers=headers,
+                body=body,
+                retry_count=retry_count,
+            )
+            
+            # Broadcast job created
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_created",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"job": job.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to create job '{name}': {e}")
+
+    async def _cloud_scheduler_create_pubsub_job(self, params: dict) -> dict:
+        """Create a new Pub/Sub Cloud Scheduler job."""
+        name = params.get("name")
+        schedule = params.get("schedule")
+        topic = params.get("topic")
+        location = params.get("location", "us-central1")
+        description = params.get("description", "")
+        timezone = params.get("timezone", "UTC")
+        data = params.get("data", "")
+        attributes = params.get("attributes")
+        retry_count = params.get("retry_count", 3)
+        
+        if not name or not schedule or not topic:
+            raise TypeError("Missing required parameters: name, schedule, topic")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            job = client.create_pubsub_job(
+                name=name,
+                schedule=schedule,
+                topic=topic,
+                location=location,
+                description=description,
+                timezone=timezone,
+                data=data,
+                attributes=attributes,
+                retry_count=retry_count,
+            )
+            
+            # Broadcast job created
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_created",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"job": job.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to create job '{name}': {e}")
+
+    async def _cloud_scheduler_update_job(self, params: dict) -> dict:
+        """Update a Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        schedule = params.get("schedule")
+        description = params.get("description")
+        timezone = params.get("timezone")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            job = client.update_job(
+                name=name,
+                location=location,
+                schedule=schedule,
+                description=description,
+                timezone=timezone,
+            )
+            
+            # Broadcast job updated
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_updated",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"job": job.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to update job '{name}': {e}")
+
+    async def _cloud_scheduler_pause_job(self, params: dict) -> dict:
+        """Pause a Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            success = client.pause_job(name, location)
+            
+            # Broadcast job paused
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_paused",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"success": success}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to pause job '{name}': {e}")
+
+    async def _cloud_scheduler_resume_job(self, params: dict) -> dict:
+        """Resume a paused Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            success = client.resume_job(name, location)
+            
+            # Broadcast job resumed
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_resumed",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"success": success}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to resume job '{name}': {e}")
+
+    async def _cloud_scheduler_run_job(self, params: dict) -> dict:
+        """Manually trigger a Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            success = client.run_job(name, location)
+            
+            # Broadcast job triggered
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_triggered",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"success": success}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to run job '{name}': {e}")
+
+    async def _cloud_scheduler_delete_job(self, params: dict) -> dict:
+        """Delete a Cloud Scheduler job."""
+        name = params.get("name")
+        location = params.get("location", "us-central1")
+        
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        
+        try:
+            client = self._get_cloud_scheduler_client()
+            success = client.delete_job(name, location)
+            
+            # Broadcast job deleted
+            await get_manager().broadcast({
+                "type": "cloud_scheduler_job_deleted",
+                "data": {"name": name, "location": location}
+            })
+            
+            return {"success": success}
+        except Exception as e:
+            raise RuntimeError(f"CloudSchedulerError: Failed to delete job '{name}': {e}")
 
 
 # Singleton handler instance

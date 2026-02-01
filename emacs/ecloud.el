@@ -86,6 +86,8 @@
 (require 'ecloud-gar)
 (require 'ecloud-ips)
 (require 'ecloud-compute)
+(require 'ecloud-cloud-run)
+(require 'ecloud-scheduler)
 (require 'ecloud-sql)
 (require 'ecloud-k8s)
 (require 'ecloud-ws)

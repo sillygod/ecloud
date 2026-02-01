@@ -73,6 +73,10 @@
       (ecloud-ws--on-gar-event type data))
      ((string-prefix-p "k8s_" type)
       (ecloud-ws--on-k8s-event type data))
+     ((string-prefix-p "cloud_run_" type)
+      (ecloud-ws--on-cloud-run-event type data))
+     ((string-prefix-p "cloud_scheduler_" type)
+      (ecloud-ws--on-cloud-scheduler-event type data))
      (t (message "Unknown ECloud event: %s" type)))))
 
 ;; Event Handlers
@@ -100,6 +104,14 @@
     (run-hook-with-args 'ecloud-k8s-event-hook type data))
    (t (run-hook-with-args 'ecloud-k8s-event-hook type data))))
 
+(defun ecloud-ws--on-cloud-run-event (type data)
+  "Handle Cloud Run event TYPE with DATA."
+  (run-hook-with-args 'ecloud-cloud-run-event-hook type data))
+
+(defun ecloud-ws--on-cloud-scheduler-event (type data)
+  "Handle Cloud Scheduler event TYPE with DATA."
+  (run-hook-with-args 'ecloud-scheduler-event-hook type data))
+
 ;; Hooks
 
 (defvar ecloud-sql-event-hook nil
@@ -112,6 +124,14 @@ Functions are called with (TYPE DATA).")
 
 (defvar ecloud-gar-event-hook nil
   "Hook run when GAR state changes.
+Functions are called with (TYPE DATA).")
+
+(defvar ecloud-cloud-run-event-hook nil
+  "Hook run when Cloud Run events occur.
+Functions are called with (TYPE DATA).")
+
+(defvar ecloud-scheduler-event-hook nil
+  "Hook run when Cloud Scheduler events occur.
 Functions are called with (TYPE DATA).")
 
 (defvar ecloud-k8s-event-hook nil

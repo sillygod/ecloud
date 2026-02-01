@@ -88,5 +88,25 @@ TIMEOUT defaults to `ecloud-notify-timeout`."
                         (kill-buffer buf)))
                     buffer-name)))
 
+(defun ecloud-notify-info (string &optional timeout)
+  "Display info notification with STRING.
+TIMEOUT defaults to `ecloud-notify-timeout`."
+  (ecloud-notify (concat "ℹ " string) timeout))
+
+(defun ecloud-notify-error (string &optional timeout)
+  "Display error notification with STRING.
+TIMEOUT defaults to `ecloud-notify-timeout`."
+  (ecloud-notify (concat "✗ " string) timeout))
+
+(defun ecloud-notify-success (string &optional timeout)
+  "Display success notification with STRING.
+TIMEOUT defaults to `ecloud-notify-timeout`."
+  (ecloud-notify (concat "✓ " string) timeout))
+
+(defun ecloud-notify-warning (string &optional timeout)
+  "Display warning notification with STRING.
+TIMEOUT defaults to `ecloud-notify-timeout`."
+  (ecloud-notify (concat "⚠ " string) timeout))
+
 (provide 'ecloud-notify)
 ;;; ecloud-notify.el ends here
