@@ -20,6 +20,7 @@ from k8s_log_streamer import get_log_streamer, K8sLogStreamer
 from helm_client import get_helm_client, HelmClient, reset_helm_client
 from cloud_run_client import get_cloud_run_client, CloudRunClient
 from cloud_scheduler_client import get_cloud_scheduler_client, CloudSchedulerClient
+from service_usage_client import get_service_usage_client, ServiceUsageClient
 from config import config
 from websocket_manager import get_manager
 from error_handler import (
@@ -46,6 +47,7 @@ K8S_ERROR = -32005
 HELM_ERROR = -32006
 CLOUD_RUN_ERROR = -32007
 CLOUD_SCHEDULER_ERROR = -32008
+SERVICE_USAGE_ERROR = -32009
 
 
 class JsonRpcRequest(BaseModel):
@@ -182,6 +184,12 @@ class JsonRpcHandler:
             "cloud_scheduler_resume_job": self._cloud_scheduler_resume_job,
             "cloud_scheduler_run_job": self._cloud_scheduler_run_job,
             "cloud_scheduler_delete_job": self._cloud_scheduler_delete_job,
+            # Service Usage methods
+            "service_usage_list_services": self._service_usage_list_services,
+            "service_usage_list_services_streaming": self._service_usage_list_services_streaming,
+            "service_usage_enable_service": self._service_usage_enable_service,
+            "service_usage_disable_service": self._service_usage_disable_service,
+            "service_usage_get_service": self._service_usage_get_service,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
@@ -1772,6 +1780,131 @@ class JsonRpcHandler:
             return {"success": success}
         except Exception as e:
             raise RuntimeError(f"CloudSchedulerError: Failed to delete job '{name}': {e}")
+
+    # ===== Service Usage Methods =====
+
+    def _get_service_usage_client(self) -> ServiceUsageClient:
+        """Get or create Service Usage client."""
+        return get_service_usage_client()
+
+    def _service_usage_list_services(self, params: dict) -> dict:
+        """List GCP services/APIs in the project."""
+        filter_state = params.get("filter_state", "")  # "", "ENABLED", or "DISABLED"
+        
+        try:
+            client = self._get_service_usage_client()
+            services = client.list_services(filter_state=filter_state)
+            return {
+                "services": [s.to_dict() for s in services],
+                "count": len(services),
+            }
+        except Exception as e:
+            raise RuntimeError(f"ServiceUsageError: Failed to list services: {e}")
+
+    async def _service_usage_list_services_streaming(self, params: dict) -> dict:
+        """List GCP services/APIs with streaming results via WebSocket."""
+        filter_state = params.get("filter_state", "")
+        stream_id = params.get("stream_id", "service_usage_list")
+        
+        try:
+            client = self._get_service_usage_client()
+            
+            total_count = 0
+            
+            # Run the streaming in a thread and collect batches
+            def get_all_batches():
+                batches = []
+                count = 0
+                for batch in client.list_services_streaming(filter_state):
+                    count += len(batch)
+                    batches.append({
+                        "services": [s.to_dict() for s in batch],
+                        "count": len(batch),
+                        "total_count": count,
+                        "is_final": False,
+                    })
+                return batches, count
+            
+            # Get all batches from thread
+            batches, total_count = await asyncio.to_thread(get_all_batches)
+            
+            # Mark last batch as final
+            if batches:
+                batches[-1]["is_final"] = True
+            
+            # Now broadcast all batches (we're back in async context)
+            for batch_data in batches:
+                await get_manager().broadcast({
+                    "type": "service_usage_list_batch",
+                    "data": {
+                        "stream_id": stream_id,
+                        **batch_data,
+                    }
+                })
+            
+            return {
+                "success": True,
+                "stream_id": stream_id,
+                "total_count": total_count,
+            }
+        except Exception as e:
+            raise RuntimeError(f"ServiceUsageError: Failed to stream services: {e}")
+
+    async def _service_usage_enable_service(self, params: dict) -> dict:
+        """Enable a GCP service/API."""
+        service_name = params.get("service_name")
+        
+        if not service_name:
+            raise TypeError("Missing required parameter: service_name")
+        
+        try:
+            client = self._get_service_usage_client()
+            result = await asyncio.to_thread(client.enable_service, service_name)
+            
+            # Broadcast service enabled
+            await get_manager().broadcast({
+                "type": "service_usage_service_enabled",
+                "data": {"service_name": service_name}
+            })
+            
+            return result
+        except Exception as e:
+            raise RuntimeError(f"ServiceUsageError: Failed to enable service '{service_name}': {e}")
+
+    async def _service_usage_disable_service(self, params: dict) -> dict:
+        """Disable a GCP service/API."""
+        service_name = params.get("service_name")
+        
+        if not service_name:
+            raise TypeError("Missing required parameter: service_name")
+        
+        try:
+            client = self._get_service_usage_client()
+            result = await asyncio.to_thread(client.disable_service, service_name)
+            
+            # Broadcast service disabled
+            await get_manager().broadcast({
+                "type": "service_usage_service_disabled",
+                "data": {"service_name": service_name}
+            })
+            
+            return result
+        except Exception as e:
+            raise RuntimeError(f"ServiceUsageError: Failed to disable service '{service_name}': {e}")
+
+    def _service_usage_get_service(self, params: dict) -> dict:
+        """Get details of a specific GCP service/API."""
+        service_name = params.get("service_name")
+        
+        if not service_name:
+            raise TypeError("Missing required parameter: service_name")
+        
+        try:
+            client = self._get_service_usage_client()
+            service = client.get_service(service_name)
+            return {"service": service.to_dict()}
+        except Exception as e:
+            raise RuntimeError(f"ServiceUsageError: Failed to get service '{service_name}': {e}")
 
 
 # Singleton handler instance

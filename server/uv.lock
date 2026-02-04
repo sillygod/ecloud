@@ -534,6 +534,7 @@ dependencies = [
     { name = "google-cloud-logging" },
     { name = "google-cloud-run" },
     { name = "google-cloud-scheduler" },
+    { name = "google-cloud-service-usage" },
     { name = "google-cloud-storage" },
     { name = "kubernetes" },
     { name = "pydantic" },
@@ -561,6 +562,7 @@ requires-dist = [
     { name = "google-cloud-logging", specifier = ">=3.8.0" },
     { name = "google-cloud-run", specifier = ">=0.10.0" },
     { name = "google-cloud-scheduler", specifier = ">=2.13.0" },
+    { name = "google-cloud-service-usage", specifier = ">=1.15.0" },
     { name = "google-cloud-storage", specifier = ">=2.14.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.26.0" },
     { name = "kubernetes", specifier = ">=29.0.0" },
@@ -992,6 +994,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9e/b8/93133334e6508bc7a71beaa53524f849c29ea6b1f9c0364ada113801f5e0/google_cloud_scheduler-2.18.0.tar.gz", hash = "sha256:c8869e234d46a7698b4bf83fba7c3ff058682fc1541bf9a1e5e8e2b9758f040c", size = 150909, upload-time = "2026-01-15T13:04:44.505Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/45/59b115ce47bc972edcb222ce7783e1e2301dac0d2afc49842b1be83b2115/google_cloud_scheduler-2.18.0-py3-none-any.whl", hash = "sha256:0818a47bd7709c4b39584ad0cfc246352778770fad70cb5ea5b54c8f0b29da99", size = 137647, upload-time = "2026-01-15T12:17:12.768Z" },
+]
+
+[[package]]
+name = "google-cloud-service-usage"
+version = "1.15.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/3e/39848fdcf4eb0465bbcb980de3b3a389e263940091c10233cc56ba902c8c/google_cloud_service_usage-1.15.0.tar.gz", hash = "sha256:6a7807944b3bf2602c57b412aac89b2faa454ce18c4d47ac577241b659694988", size = 68724, upload-time = "2026-01-15T13:03:56.702Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/3a/92cbfd98fb41bc7f5a3700783a1e5a57571b62e6b5cf641f6db2a12101df/google_cloud_service_usage-1.15.0-py3-none-any.whl", hash = "sha256:9d0cfb33af32f3e16bb8c71a65ad341fe033aa4c29027ebcaebd09cd8bd8d235", size = 65783, upload-time = "2026-01-15T12:17:06.95Z" },
 ]
 
 [[package]]

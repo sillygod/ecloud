@@ -77,6 +77,8 @@
       (ecloud-ws--on-cloud-run-event type data))
      ((string-prefix-p "cloud_scheduler_" type)
       (ecloud-ws--on-cloud-scheduler-event type data))
+     ((string-prefix-p "service_usage_" type)
+      (ecloud-ws--on-service-usage-event type data))
      (t (message "Unknown ECloud event: %s" type)))))
 
 ;; Event Handlers
@@ -112,6 +114,10 @@
   "Handle Cloud Scheduler event TYPE with DATA."
   (run-hook-with-args 'ecloud-scheduler-event-hook type data))
 
+(defun ecloud-ws--on-service-usage-event (type data)
+  "Handle Service Usage event TYPE with DATA."
+  (run-hook-with-args 'ecloud-service-usage-event-hook type data))
+
 ;; Hooks
 
 (defvar ecloud-sql-event-hook nil
@@ -141,6 +147,10 @@ Functions are called with (TYPE DATA).")
 (defvar ecloud-k8s-log-hook nil
   "Hook run when K8s log lines arrive.
 Functions are called with (DATA) containing stream_id, pod, container, line.")
+
+(defvar ecloud-service-usage-event-hook nil
+  "Hook run when Service Usage events occur.
+Functions are called with (TYPE DATA).")
 
 (provide 'ecloud-ws)
 

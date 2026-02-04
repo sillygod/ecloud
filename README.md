@@ -740,12 +740,75 @@ Helm 操作使用與 K8s 相同的認證機制：
 0 */6 * * *     # 每 6 小時
 ```
 
+## Service Usage (API Management)
+
+使用 `M-x ecloud-services-enable` 或 `M-x ecloud-services-list` 管理 GCP 服務/API。支援啟用、停用和查看服務狀態。
+
+| 指令 | 功能 |
+|------|------|
+| `ecloud-services-list` | 列出所有服務（可過濾狀態） |
+| `ecloud-services-enable` | 啟用服務（模糊搜尋） |
+| `ecloud-services-enable-by-name` | 直接輸入服務名稱啟用 |
+| `ecloud-services-disable` | 停用服務（需確認） |
+| `ecloud-services-get-info` | 查看服務詳細資訊 |
+
+### Service Usage 功能特色
+
+- **服務管理**: 列出、啟用和停用 GCP 服務/API
+- **模糊搜尋**: 使用 Emacs completing-read 進行模糊搜尋
+- **狀態過濾**: 可過濾顯示已啟用或已停用的服務
+- **效能最佳化**: 預設只列出已啟用的服務（快速）
+- **非同步操作**: 啟用/停用操作不會阻塞 UI
+- **視覺回饋**: 操作成功或失敗時顯示通知
+- **多帳號支援**: 與現有多帳號架構無縫整合
+
+> **效能提示**: `ecloud-services-list` 預設只顯示已啟用的服務（通常 10-50 個），速度很快。使用 `C-u` 前綴可選擇顯示所有服務，但會較慢（200+ 個服務）。
+
+### 常用服務
+
+| 服務名稱 | 說明 |
+|---------|------|
+| `compute.googleapis.com` | Compute Engine API |
+| `run.googleapis.com` | Cloud Run API |
+| `container.googleapis.com` | Kubernetes Engine API |
+| `sqladmin.googleapis.com` | Cloud SQL Admin API |
+| `storage.googleapis.com` | Cloud Storage API |
+| `cloudscheduler.googleapis.com` | Cloud Scheduler API |
+| `artifactregistry.googleapis.com` | Artifact Registry API |
+
+### 使用範例
+
+```elisp
+;; 列出已啟用的服務（快速，預設行為）
+M-x ecloud-services-list
+
+;; 列出所有服務（較慢）
+C-u M-x ecloud-services-list
+;; 選擇: All
+
+;; 啟用 Compute Engine API
+M-x ecloud-services-enable
+;; 輸入: compute
+;; 選擇: compute.googleapis.com - Compute Engine API
+
+;; 直接啟用 Cloud Run API
+M-x ecloud-services-enable-by-name
+;; 輸入: run.googleapis.com
+
+;; 列出所有已啟用的服務
+C-u M-x ecloud-services-list
+;; 選擇: ENABLED
+```
+
+詳細說明請參考 [SERVICE_USAGE_GUIDE.md](SERVICE_USAGE_GUIDE.md)。
+
 ## Real-time Updates (WebSockets)
 
 支援透過 WebSocket 進行即時狀態更新：
 - **K8s Logs**: 支援即時 Log Streaming。
 - **Cloud Run**: 部署和刪除服務時即時更新列表。
 - **Cloud Scheduler**: 建立、暫停、恢復、刪除任務時即時更新列表。
+- **Service Usage**: 啟用/停用服務時即時更新。
 - **Cloud SQL Proxy**: 啟動/停止時即時更新列表狀態 (Proxy Column)。
 - **GCS**: 上傳/下載/刪除動作完成後，自動重新整理檔案列表。
 - **GAR**: Docker Pull/Push 或刪除動作完成後，自動重新整理列表。

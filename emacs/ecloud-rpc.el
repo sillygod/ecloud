@@ -863,5 +863,48 @@ Set to nil for faster listing with basic info only."
   "List all available API resources asynchronously."
   (ecloud-rpc-request-async "k8s_list_api_resources" callback nil error-callback))
 
+;;; Service Usage Operations
+
+(defun ecloud-rpc-service-usage-list-services (&optional filter-state)
+  "List GCP services/APIs in the project.
+FILTER-STATE can be \"ENABLED\", \"DISABLED\", or nil for all."
+  (let ((params (when filter-state (list :filter_state filter-state))))
+    (ecloud-rpc-request "service_usage_list_services" params)))
+
+(defun ecloud-rpc-service-usage-list-services-async (callback &optional filter-state error-callback)
+  "List GCP services/APIs asynchronously."
+  (let ((params (when filter-state (list :filter_state filter-state))))
+    (ecloud-rpc-request-async "service_usage_list_services" callback params error-callback)))
+
+(defun ecloud-rpc-service-usage-list-services-streaming-async (callback &optional filter-state stream-id error-callback)
+  "List GCP services/APIs with streaming results via WebSocket."
+  (let ((params (list :filter_state (or filter-state "DISABLED")
+                     :stream_id (or stream-id "service_usage_list"))))
+    (ecloud-rpc-request-async "service_usage_list_services_streaming" callback params error-callback)))
+
+(defun ecloud-rpc-service-usage-enable-service (service-name)
+  "Enable a GCP service/API SERVICE-NAME."
+  (ecloud-rpc-request "service_usage_enable_service" (list :service_name service-name)))
+
+(defun ecloud-rpc-service-usage-enable-service-async (service-name callback &optional error-callback)
+  "Enable a GCP service/API SERVICE-NAME asynchronously."
+  (ecloud-rpc-request-async "service_usage_enable_service" callback
+                            (list :service_name service-name)
+                            error-callback))
+
+(defun ecloud-rpc-service-usage-disable-service (service-name)
+  "Disable a GCP service/API SERVICE-NAME."
+  (ecloud-rpc-request "service_usage_disable_service" (list :service_name service-name)))
+
+(defun ecloud-rpc-service-usage-disable-service-async (service-name callback &optional error-callback)
+  "Disable a GCP service/API SERVICE-NAME asynchronously."
+  (ecloud-rpc-request-async "service_usage_disable_service" callback
+                            (list :service_name service-name)
+                            error-callback))
+
+(defun ecloud-rpc-service-usage-get-service (service-name)
+  "Get details of a specific GCP service/API SERVICE-NAME."
+  (ecloud-rpc-request "service_usage_get_service" (list :service_name service-name)))
+
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

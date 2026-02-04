@@ -91,6 +91,7 @@
 (require 'ecloud-sql)
 (require 'ecloud-k8s)
 (require 'ecloud-ws)
+(require 'ecloud-services)
 (require 'ecloud-transient)
 (require 'ecloud-account-manager)
 
@@ -138,6 +139,26 @@
 ;;;###autoload
 (autoload 'ecloud-ws-disconnect "ecloud-ws"
   "Disconnect from the ECloud WebSocket server." t)
+
+;;;###autoload
+(autoload 'ecloud-services-list "ecloud-services"
+  "List GCP services/APIs in the project." t)
+
+;;;###autoload
+(autoload 'ecloud-services-enable "ecloud-services"
+  "Enable a GCP service/API with fuzzy completion." t)
+
+;;;###autoload
+(autoload 'ecloud-services-enable-by-name "ecloud-services"
+  "Enable a GCP service/API by name directly." t)
+
+;;;###autoload
+(autoload 'ecloud-services-disable "ecloud-services"
+  "Disable a GCP service/API with fuzzy completion." t)
+
+;;;###autoload
+(autoload 'ecloud-services-get-info "ecloud-services"
+  "Get detailed information about a GCP service/API." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"
