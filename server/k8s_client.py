@@ -361,11 +361,20 @@ class K8sClient:
         
         clusters = []
         for c in response.clusters:
+            # Prefer DNS endpoint over IP
+            dns_endpoint = None
+            try:
+                dns_config = c.control_plane_endpoints_config.dns_endpoint_config
+                if dns_config.endpoint:
+                    dns_endpoint = dns_config.endpoint
+            except (AttributeError, Exception):
+                pass
+
             clusters.append(ClusterInfo(
                 name=c.name,
                 location=c.location,
                 status=c.status.name if hasattr(c.status, 'name') else str(c.status),
-                endpoint=c.endpoint,
+                endpoint=dns_endpoint or c.endpoint,
                 node_count=c.initial_node_count or 0,
                 current_node_count=c.current_node_count or 0,
                 version=c.current_master_version or "",
@@ -378,27 +387,44 @@ class K8sClient:
         name = f"projects/{self._project}/locations/{location}/clusters/{cluster_name}"
         cluster = self._gke_client.get_cluster(name=name)
         
-        # Decode and save CA cert
-        ca_cert = base64.b64decode(cluster.master_auth.cluster_ca_certificate)
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.crt', mode='wb') as f:
-            f.write(ca_cert)
-            self._ca_cert_path = f.name
-        
+        # Prefer DNS endpoint over IP to avoid firewall/VPN issues
+        dns_endpoint = None
+        try:
+            dns_config = cluster.control_plane_endpoints_config.dns_endpoint_config
+            if dns_config.endpoint:
+                dns_endpoint = dns_config.endpoint
+        except (AttributeError, Exception):
+            pass
+
+        # Decode and save CA cert (only needed for IP endpoint)
+        if not dns_endpoint:
+            ca_cert = base64.b64decode(cluster.master_auth.cluster_ca_certificate)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.crt', mode='wb') as f:
+                f.write(ca_cert)
+                self._ca_cert_path = f.name
+
         # Build K8s configuration
         self._config = k8s.Configuration()
-        self._config.host = f"https://{cluster.endpoint}"
-        self._config.ssl_ca_cert = self._ca_cert_path
-        
+
+        if dns_endpoint:
+            # DNS endpoint uses Google public CA, use system CA bundle
+            self._config.host = f"https://{dns_endpoint}"
+        else:
+            # IP endpoint uses cluster's self-signed CA
+            self._config.host = f"https://{cluster.endpoint}"
+            self._config.ssl_ca_cert = self._ca_cert_path
+
         # Get fresh token
         self._credentials.refresh(Request())
         self._config.api_key = {"authorization": f"Bearer {self._credentials.token}"}
-        
+
         # Create API client
         self._api_client = k8s.ApiClient(self._config)
+        actual_endpoint = dns_endpoint or cluster.endpoint
         self._connected_cluster = {
             "name": cluster_name,
             "location": location,
-            "endpoint": cluster.endpoint,
+            "endpoint": actual_endpoint,
         }
     
     def disconnect(self):

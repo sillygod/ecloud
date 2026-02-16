@@ -133,7 +133,7 @@ Shows current cluster connection status in the menu header."
     ("n" "Namespaces" ecloud-k8s-switch-to-namespaces)
     ("h" "Helm Releases" ecloud-k8s-helm-list)]
    ["Cluster Actions"
-    ("c" "Connect to cluster" ecloud-k8s-list)
+    ("c" "Connect/Switch cluster" ecloud-k8s-switch-cluster)
     ("D" "Disconnect" ecloud-k8s-disconnect)]]
   ["Navigation"
    ("q" "Back to main menu" ecloud-menu)

@@ -1654,5 +1654,14 @@ Similar to kubectl api-resources output."
           (ecloud-k8s--fetch-clusters))))
     (switch-to-buffer buffer)))
 
+(defun ecloud-k8s-switch-cluster ()
+  "Show cluster list to connect/switch to a different cluster."
+  (interactive)
+  (let ((buffer (get-buffer-create "*ECloud-K8s*")))
+    (with-current-buffer buffer
+      (ecloud-k8s-mode)
+      (ecloud-k8s--fetch-clusters))
+    (switch-to-buffer buffer)))
+
 (provide 'ecloud-k8s)
 ;;; ecloud-k8s.el ends here
