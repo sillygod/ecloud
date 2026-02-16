@@ -252,6 +252,22 @@ def auto_refresh_token(method):
                 self._refresh_token()
                 return method(self, *args, **kwargs)
             raise
+        except Exception as e:
+            # Check for connection timeout errors
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ['timeout', 'timed out', 'connection', 'max retries']):
+                # Provide helpful error message
+                raise RuntimeError(
+                    f"K8sConnectionError: Failed to connect to cluster endpoint.\n"
+                    f"Original error: {e}\n\n"
+                    f"Possible causes:\n"
+                    f"1. VPN is not connected (most common)\n"
+                    f"2. Firewall blocking connection\n"
+                    f"3. Private GKE cluster without proper access\n"
+                    f"4. Network connectivity issues\n\n"
+                    f"Suggestion: If you can use kubectl/k9s successfully, try connecting to VPN first."
+                ) from e
+            raise
     return wrapper
 
 

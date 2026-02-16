@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ecloud
+;; Author: jing
 ;; Keywords: tools, cloud
 
 ;;; Commentary:
@@ -728,6 +728,25 @@ LIMIT can be used to restrict the number of pods returned for performance."
   (let ((params (list :namespace namespace :name name :command command)))
     (when container (setq params (plist-put params :container container)))
     (plist-get (ecloud-rpc-request "k8s_pod_exec" params) :output)))
+
+(defun ecloud-rpc-k8s-pod-exec-interactive (namespace pod-name &optional container command)
+  "Start interactive pod exec session. Returns session-id."
+  (let ((params (list :namespace namespace :pod_name pod-name)))
+    (when container (setq params (plist-put params :container container)))
+    (when command (setq params (plist-put params :command command)))
+    (ecloud-rpc-request "k8s_pod_exec_interactive" params)))
+
+(defun ecloud-rpc-k8s-pod-exec-send-input (session-id input)
+  "Send input to exec session."
+  (ecloud-rpc-request "k8s_pod_exec_send_input" (list :session_id session-id :input input)))
+
+(defun ecloud-rpc-k8s-pod-exec-stop-session (session-id)
+  "Stop exec session."
+  (ecloud-rpc-request "k8s_pod_exec_stop_session" (list :session_id session-id)))
+
+(defun ecloud-rpc-k8s-pod-exec-list-sessions ()
+  "List active exec sessions."
+  (ecloud-rpc-request "k8s_pod_exec_list_sessions" nil))
 
 (defun ecloud-rpc-k8s-apply-manifest-async (manifest namespace callback &optional error-callback)
   "Apply manifest asynchronously."

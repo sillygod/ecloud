@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ecloud
+;; Author: jing
 ;; Keywords: tools, cloud, notification
 
 ;;; Commentary:

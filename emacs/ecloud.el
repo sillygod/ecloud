@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ecloud
+;; Author: jing
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: tools, cloud, gcs, google

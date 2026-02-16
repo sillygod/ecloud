@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ecloud
+;; Author: jing
 ;; Keywords: tools, cloud, transient
 ;; Package-Requires: ((emacs "28.1") (transient "0.3.0"))
 

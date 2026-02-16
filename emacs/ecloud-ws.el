@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ecloud
+;; Author: jing
 ;; Keywords: tools, cloud
 
 ;;; Commentary:
@@ -100,6 +100,12 @@
   (cond
    ((string= type "k8s_log")
     (run-hook-with-args 'ecloud-k8s-log-hook data))
+   ((string= type "k8s_exec_output")
+    (run-hook-with-args 'ecloud-k8s-exec-hook data))
+   ((string= type "k8s_exec_session_started")
+    (run-hook-with-args 'ecloud-k8s-event-hook type data))
+   ((string= type "k8s_exec_session_stopped")
+    (run-hook-with-args 'ecloud-k8s-event-hook type data))
    ((string= type "k8s_log_stream_started")
     (run-hook-with-args 'ecloud-k8s-event-hook type data))
    ((string= type "k8s_log_stream_stopped")

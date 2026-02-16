@@ -17,6 +17,7 @@ from sql_client import get_sql_client, SQLClient
 from sql_proxy import get_proxy_manager, SQLProxyManager
 from k8s_client import get_k8s_client, K8sClient
 from k8s_log_streamer import get_log_streamer, K8sLogStreamer
+from k8s_pod_exec_streamer import get_pod_exec_streamer, K8sPodExecStreamer
 from helm_client import get_helm_client, HelmClient, reset_helm_client
 from cloud_run_client import get_cloud_run_client, CloudRunClient
 from cloud_scheduler_client import get_cloud_scheduler_client, CloudSchedulerClient
@@ -152,6 +153,10 @@ class JsonRpcHandler:
             "k8s_start_log_stream": self._k8s_start_log_stream,
             "k8s_stop_log_stream": self._k8s_stop_log_stream,
             "k8s_list_log_streams": self._k8s_list_log_streams,
+            "k8s_pod_exec_interactive": self._k8s_pod_exec_interactive,
+            "k8s_pod_exec_send_input": self._k8s_pod_exec_send_input,
+            "k8s_pod_exec_stop_session": self._k8s_pod_exec_stop_session,
+            "k8s_pod_exec_list_sessions": self._k8s_pod_exec_list_sessions,
             "k8s_get_resources": self._k8s_get_resources,
             "k8s_list_api_resources": self._k8s_list_api_resources,
             # Helm methods
@@ -905,6 +910,10 @@ class JsonRpcHandler:
     def _get_log_streamer(self) -> K8sLogStreamer:
         """Get the log streamer instance."""
         return get_log_streamer(self._get_k8s_client())
+    
+    def _get_pod_exec_streamer(self) -> K8sPodExecStreamer:
+        """Get the pod exec streamer instance."""
+        return get_pod_exec_streamer(self._get_k8s_client())
 
     def _k8s_list_clusters(self, params: dict) -> dict:
         """List GKE clusters."""
@@ -956,8 +965,9 @@ class JsonRpcHandler:
     def _k8s_disconnect(self, params: dict) -> dict:
         """Disconnect from current cluster."""
         client = self._get_k8s_client()
-        # Stop all log streams first
+        # Stop all log streams and exec sessions first
         self._get_log_streamer().stop_all()
+        self._get_pod_exec_streamer().stop_all()
         client.disconnect()
         
         # Reset Helm client when disconnecting from cluster
@@ -1181,6 +1191,87 @@ class JsonRpcHandler:
         streamer = self._get_log_streamer()
         streams = streamer.list_streams()
         return {"streams": streams}
+    
+    async def _k8s_pod_exec_interactive(self, params: dict) -> dict:
+        """Start interactive pod exec session."""
+        namespace = params.get("namespace")
+        pod_name = params.get("pod_name")
+        container = params.get("container")
+        command = params.get("command")  # Optional, defaults to ["/bin/sh"]
+        
+        if not namespace or not pod_name:
+            raise TypeError("Missing required parameters: namespace, pod_name")
+        
+        if command and isinstance(command, str):
+            command = [command]
+        
+        async def on_output(session_id: str, output: str):
+            await get_manager().broadcast({
+                "type": "k8s_exec_output",
+                "data": {
+                    "session_id": session_id,
+                    "output": output,
+                }
+            })
+        
+        streamer = self._get_pod_exec_streamer()
+        session_id = await streamer.start_exec_session(
+            namespace=namespace,
+            pod_name=pod_name,
+            container=container,
+            command=command,
+            on_output=on_output,
+        )
+        
+        # Broadcast session started
+        await get_manager().broadcast({
+            "type": "k8s_exec_session_started",
+            "data": {
+                "session_id": session_id,
+                "namespace": namespace,
+                "pod_name": pod_name,
+                "container": container,
+            }
+        })
+        
+        return {"session_id": session_id}
+    
+    async def _k8s_pod_exec_send_input(self, params: dict) -> dict:
+        """Send input to exec session."""
+        session_id = params.get("session_id")
+        input_data = params.get("input")
+        
+        if not session_id or input_data is None:
+            raise TypeError("Missing required parameters: session_id, input")
+        
+        streamer = self._get_pod_exec_streamer()
+        await streamer.send_input(session_id, input_data)
+        
+        return {"success": True}
+    
+    def _k8s_pod_exec_stop_session(self, params: dict) -> dict:
+        """Stop an exec session."""
+        session_id = params.get("session_id")
+        if not session_id:
+            raise TypeError("Missing parameter: session_id")
+        
+        streamer = self._get_pod_exec_streamer()
+        success = streamer.stop_session(session_id)
+        
+        if success:
+            # Broadcast session stopped
+            asyncio.create_task(get_manager().broadcast({
+                "type": "k8s_exec_session_stopped",
+                "data": {"session_id": session_id}
+            }))
+        
+        return {"success": success}
+    
+    def _k8s_pod_exec_list_sessions(self, params: dict) -> dict:
+        """List active exec sessions."""
+        streamer = self._get_pod_exec_streamer()
+        sessions = streamer.list_sessions()
+        return {"sessions": sessions}
 
     # --- Helm Method implementations ---
 

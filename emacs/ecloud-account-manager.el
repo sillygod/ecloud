@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024
 
-;; Author: ECloud Contributors
+;; Author: jing
 ;; Keywords: cloud, gcp, google-cloud
 ;; Package-Requires: ((emacs "27.1"))
 
@@ -686,9 +686,12 @@ Side effects:
           ;; Step 3: Set up environment and start process
           (let* ((server-dir (ecloud-account--get-server-directory))
                  (process-environment
-                  (cons (format "GOOGLE_APPLICATION_CREDENTIALS=%s" 
-                               (expand-file-name service-account-path))
-                        process-environment))
+                  (append
+                   (list (format "GOOGLE_APPLICATION_CREDENTIALS=%s" 
+                                (expand-file-name service-account-path))
+                         ;; Fix for VPN DNS issues with gRPC
+                         "GRPC_DNS_RESOLVER=native")
+                   process-environment))
                  (default-directory server-dir))
             
             ;; Step 4: Start the process

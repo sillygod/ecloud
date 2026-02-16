@@ -1094,6 +1094,125 @@ When LIMIT is positive, fetch up to that many pods."
           (insert output)
           (pop-to-buffer (current-buffer)))))))
 
+;; --- Interactive Shell (Simple Buffer Mode) ---
+
+;; Cleanup function for exec sessions
+(defun ecloud-k8s--cleanup-exec-session ()
+  "Clean up exec session when buffer is killed."
+  (when (and (bound-and-true-p ecloud-k8s--exec-session-id)
+             (not (string= ecloud-k8s--exec-session-id "pending")))
+    (condition-case err
+        (ecloud-rpc-k8s-pod-exec-stop-session ecloud-k8s--exec-session-id)
+      (error (message "Error stopping exec session: %s" err)))))
+
+;; Simple shell mode for K8s pod exec
+(define-derived-mode ecloud-k8s-shell-mode fundamental-mode "K8s-Shell"
+  "Major mode for K8s pod interactive shell."
+  (setq buffer-read-only nil)
+  (use-local-map (make-sparse-keymap))
+  (local-set-key (kbd "RET") #'ecloud-k8s--shell-send-input)
+  (local-set-key (kbd "C-c C-c") #'ecloud-k8s--shell-send-input)
+  (add-hook 'kill-buffer-hook #'ecloud-k8s--cleanup-exec-session nil t))
+
+(defun ecloud-k8s-pod-exec-vterm ()
+  "Execute interactive shell in pod."
+  (interactive)
+  (unless (eq ecloud-k8s--current-view 'pods)
+    (user-error "Exec only available for pods"))
+  
+  (let* ((entry (tabulated-list-get-id))
+         (name (plist-get entry :name))
+         (namespace (plist-get entry :namespace))
+         (containers (plist-get entry :containers))
+         (container (if (> (length containers) 1)
+                        (completing-read "Container: " containers nil t)
+                      (car containers)))
+         (buffer-name (format "*k8s-shell-%s/%s*" namespace name)))
+    
+    (ecloud-notify (format "Starting interactive shell in %s/%s..." name container))
+    
+    ;; Kill existing buffer if any
+    (when (get-buffer buffer-name)
+      (kill-buffer buffer-name))
+    
+    ;; Create shell buffer
+    (let ((buf (get-buffer-create buffer-name)))
+      (with-current-buffer buf
+        (ecloud-k8s-shell-mode)
+        (setq-local ecloud-k8s--exec-session-id "pending")
+        (setq-local ecloud-k8s--input-start-marker (point-max-marker))
+        (insert (format "Connecting to %s/%s...\n" namespace name)))
+      
+      ;; Display buffer
+      (switch-to-buffer buf)
+      (goto-char (point-max))
+      
+      ;; Start exec session
+      (let ((resp (ecloud-rpc-k8s-pod-exec-interactive namespace name container)))
+        (let ((session-id (plist-get resp :session_id)))
+          (unless session-id
+            (with-current-buffer buf
+              (insert "\nError: Failed to start exec session\n"))
+            (user-error "Failed to start exec session"))
+          
+          (if (not (buffer-live-p buf))
+              (user-error "Buffer was deleted unexpectedly")
+            
+            ;; Update session ID
+            (with-current-buffer buf
+              (setq-local ecloud-k8s--exec-session-id session-id)
+              (insert (format "Connected! Session: %s\n" session-id))
+              (set-marker ecloud-k8s--input-start-marker (point-max)))
+            
+            (ecloud-notify (format "Interactive shell started (session: %s)" session-id))))))))
+
+(defun ecloud-k8s--on-exec-output (data)
+  "Handle exec output from WebSocket."
+  (let ((session-id (plist-get data :session_id))
+        (output (plist-get data :output)))
+    ;; Filter out carriage returns for cleaner display
+    (setq output (replace-regexp-in-string "\r" "" output))
+    (let ((found nil))
+      (dolist (buf (buffer-list))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (when (and (eq major-mode 'ecloud-k8s-shell-mode)
+                       (bound-and-true-p ecloud-k8s--exec-session-id)
+                       (not (string= ecloud-k8s--exec-session-id "pending"))
+                       (equal ecloud-k8s--exec-session-id session-id))
+              (setq found t)
+              (let ((at-end (= (point) (point-max))))
+                ;; Insert at end
+                (save-excursion
+                  (goto-char (point-max))
+                  (insert output))
+                ;; Move point if we were at end
+                (when at-end
+                  (goto-char (point-max)))
+                ;; Update input marker
+                (set-marker ecloud-k8s--input-start-marker (point-max))))))))))
+
+(defun ecloud-k8s--shell-send-input ()
+  "Send input from shell buffer to exec session."
+  (interactive)
+  (when (and (eq major-mode 'ecloud-k8s-shell-mode)
+             (bound-and-true-p ecloud-k8s--exec-session-id)
+             (not (string= ecloud-k8s--exec-session-id "pending")))
+    (let* ((input-start (marker-position ecloud-k8s--input-start-marker))
+           (input (buffer-substring-no-properties input-start (point-max))))
+      (when (> (length input) 0)
+        (ecloud-rpc-k8s-pod-exec-send-input ecloud-k8s--exec-session-id (concat input "\n"))
+        ;; Clear input area
+        (delete-region input-start (point-max))
+        (set-marker ecloud-k8s--input-start-marker (point-max))))))
+
+;; Hook for WebSocket exec output events
+(defvar ecloud-k8s-exec-hook nil
+  "Hook run when exec output is received via WebSocket.")
+
+(add-hook 'ecloud-k8s-exec-hook #'ecloud-k8s--on-exec-output)
+
+
 (defun ecloud-k8s-apply-manifest ()
   "Apply a Kubernetes manifest."
   (interactive)
@@ -1322,6 +1441,7 @@ Similar to kubectl api-resources output."
     (kbd "L") #'ecloud-k8s-stream-logs
     (kbd "S") #'ecloud-k8s-scale-deployment
     (kbd "e") #'ecloud-k8s-pod-exec
+    (kbd "E") #'ecloud-k8s-pod-exec-vterm
     (kbd "A") #'ecloud-k8s-apply-manifest
     (kbd "M") #'ecloud-k8s-show-metrics
     (kbd "r") #'ecloud-k8s-refresh

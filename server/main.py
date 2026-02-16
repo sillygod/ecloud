@@ -3,6 +3,11 @@
 Provides a JSON-RPC endpoint for GCloud Storage operations.
 """
 
+# IMPORTANT: Set gRPC DNS resolver BEFORE any imports
+# This fixes VPN DNS issues where c-ares fails to resolve googleapis.com
+import os
+os.environ.setdefault('GRPC_DNS_RESOLVER', 'native')
+
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

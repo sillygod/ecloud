@@ -282,6 +282,11 @@ Server 會在 `http://127.0.0.1:8765` 啟動。
 (load-file "/yourpath/ecloud/emacs/ecloud-transient.el")
 (load-file "/yourpath/ecloud/emacs/ecloud-account-manager.el")
 
+(setq ecloud-accounts
+      '((staging . "/path/to/staging-service-account.json")
+        (production . "/path/to/production-service-account.json")
+        (dev . "/path/to/dev-service-account.json")))
+
 
 ;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
 ;; (setq ecloud-server-url "http://localhost:8765/jsonrpc")
@@ -413,6 +418,7 @@ Q  Quit
 ### 支援功能
 - **多視圖切換**：Pods (`p`), Services (`s`), Ingresses (`i`), Deployments (`d`), Namespaces (`n`), Helm Releases (`h`)。
 - **日誌串流**：即時查看 Pod Logs (WebSocket)。
+- **互動式 Shell**：使用 vterm 進入 Pod 執行命令 (類似 `kubectl exec -it`)。
 - **YAML 檢視**：快速查看資源定義。
 - **Helm 管理**：安裝、升級、回滾、卸載 Helm releases。
 
@@ -428,9 +434,22 @@ Q  Quit
 | `y` | 查看資源 YAML |
 | `l` | 查看 Logs (靜態) |
 | `L` | 開始 Logs Streaming |
+| `e` | 執行單次命令 (同步) |
+| `E` | 進入互動式 Shell (vterm) |
 | `r` | 重新整理 |
 | `Q` | 斷開 Cluster 連線 |
 | `q` | 關閉視窗 |
+
+### 互動式 Pod Shell (vterm)
+
+在 Pods 列表中按 `E` 可以進入互動式 shell，就像使用 `kubectl exec -it` 一樣：
+
+- 使用 vterm 提供完整的終端模擬
+- 支援多容器 Pod（會提示選擇容器）
+- 自動處理 WebSocket 雙向通信
+- 關閉 buffer 時自動清理會話
+
+這個功能類似於 Compute Engine 的 SSH 功能，讓你可以直接在 Emacs 中操作 Pod 內的 shell。
 
 ### 大型叢集效能優化
 
@@ -1140,6 +1159,30 @@ gcloud iam service-accounts add-iam-policy-binding [SA_EMAIL] \
 1. 使用 namespace 過濾減少查詢範圍
 2. 檢查 cluster 健康狀態
 3. 考慮使用本地 kubeconfig 快取
+
+## 故障排除
+
+如果遇到問題，請參考：
+
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - 完整的故障排除指南
+  - K8s 連接問題（VPN、timeout 等）
+  - Pod exec vterm 問題
+  - 一般問題和診斷工具
+
+- **[VPN_WORKAROUND.md](VPN_WORKAROUND.md)** - VPN 連接問題詳解
+  - 為什麼 k9s 可以工作但 ECloud 不行
+  - 網路架構差異說明
+  - 解決方案和替代方案
+
+- **診斷工具**:
+  ```bash
+  python3 diagnose_k8s_connection.py
+  ```
+
+常見問題：
+- **連接超時**: 檢查 VPN 是否已連接
+- **vterm 錯誤**: 安裝 vterm package
+- **權限錯誤**: 檢查 Service Account 權限
 
 ## License
 
