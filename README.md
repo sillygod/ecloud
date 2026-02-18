@@ -44,6 +44,47 @@ Backend 使用以下主要套件（透過 `uv` 自動安裝）：
   brew install docker
   ```
 
+## 安裝
+
+### 方式一：使用 straight.el + use-package（推薦）
+
+```elisp
+(use-package ecloud
+  :straight (:host github :repo "sillygod/ecloud" :files ("emacs/*.el" "server"))
+  :custom
+  (ecloud-accounts '((staging . "/path/to/staging-service-account.json")
+                     (production . "/path/to/production-service-account.json")))
+  :config
+  (require 'ecloud-transient))
+```
+
+依賴套件（`posframe`, `websocket`, `transient`）會自動安裝。
+
+Python server 依賴需要另外安裝：
+
+```bash
+cd ~/.emacs.d/straight/build/ecloud/server  # 或你的 straight build 路徑
+uv sync
+```
+
+### 方式二：手動安裝
+
+```elisp
+(add-to-list 'load-path "/yourpath/ecloud/emacs")
+(require 'ecloud)
+
+(setq ecloud-accounts
+      '((staging . "/path/to/staging-service-account.json")
+        (production . "/path/to/production-service-account.json")))
+```
+
+Python server 依賴：
+
+```bash
+cd /yourpath/ecloud/server
+uv sync
+```
+
 ## Multi-Account Support
 
 ECloud 支援同時管理多個 Google Cloud 帳號，每個帳號使用獨立的 service account 和 server process。這對於需要管理多個 GCP 專案或環境（如 staging、production）的使用者特別有用。
@@ -73,7 +114,7 @@ ECloud 支援同時管理多個 Google Cloud 帳號，每個帳號使用獨立�
 
 ### 透過 Transient Menu 使用
 
-執行 `M-x ecloud` 開啟主選單，選擇：
+執行 `M-x ecloud-menu` 開啟主選單，選擇：
 - `a` - 切換帳號
 - `A` - 查看帳號列表
 
@@ -98,11 +139,11 @@ ECloud 支援同時管理多個 Google Cloud 帳號，每個帳號使用獨立�
 ECloud 會記住最後使用的帳號，並在下次啟動時自動連線：
 
 ```elisp
-;; 啟用自動連線（預設）
-(setq ecloud-auto-connect-last-account t)
-
 ;; 停用自動連線
 (setq ecloud-auto-connect-last-account nil)
+
+;; 啟用自動連線（預設）
+(setq ecloud-auto-connect-last-account t)
 ```
 
 ### Port 配置
@@ -254,80 +295,16 @@ uv run uvicorn main:app --port 8765 --reload
 
 Server 會在 `http://127.0.0.1:8765` 啟動。
 
-### 3. 設定 Emacs
+### 3. 使用
 
-在你的 `init.el` 加入：
-
-```elisp
-(add-to-list 'load-path "/yourpath/ecloud/emacs")
-(require 'ecloud)
-
-;; 載入 Transient Menu（推薦，需要 Emacs 28+ 或安裝 transient package）
-(require 'ecloud-transient)
-
-;; when you want to reload modified code
-(load-file "/yourpath/ecloud/emacs/ecloud.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-ips.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-browser.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-gar.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-sql.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-rpc.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-compute.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-k8s.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-scheduler.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-cloud-run.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-notify.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-ws.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-commands.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-transient.el")
-(load-file "/yourpath/ecloud/emacs/ecloud-account-manager.el")
-
-(setq ecloud-accounts
-      '((staging . "/path/to/staging-service-account.json")
-        (production . "/path/to/production-service-account.json")
-        (dev . "/path/to/dev-service-account.json")))
-
-
-;; 可選：自訂 server URL（預設為 http://127.0.0.1:8765/jsonrpc）
-;; (setq ecloud-server-url "http://localhost:8765/jsonrpc")
-```
-
-#### Transient Menu 需求
-
-ECloud 的 Transient Menu 需要 Emacs Transient library：
-
-- **Emacs 28+**: Transient 已內建，無需額外安裝
-- **Emacs 27**: 需要安裝 `transient` package
-
-**安裝 Transient (Emacs 27)**:
-
-使用 `package.el`:
-```elisp
-M-x package-install RET transient RET
-```
-
-或使用 `use-package`:
-```elisp
-(use-package transient
-  :ensure t)
-```
-
-如果不使用 Transient Menu，您仍可使用所有 `M-x ecloud-*` 指令。
-
-### 4. 使用
-
-#### 統一入口 - Transient Menu (推薦)
-
-ECloud 提供統一的 Transient Menu 介面，讓您快速存取所有功能：
-
-- `M-x ecloud` - 開啟主選單，顯示所有 GCP 服務選項
+`M-x ecloud-menu` 開啟主選單，顯示所有 GCP 服務選項。
 
 從主選單可以導航到：
 - **Storage & Data**: GCS Browser, Cloud SQL
 - **Compute & Containers**: Compute Engine, Cloud Run, Cloud Scheduler, Kubernetes (GKE)
 - **Networking & Registry**: IP Addresses, Artifact Registry
 
-#### 傳統指令 (向後相容)
+#### 獨立指令
 
 您也可以直接使用獨立指令：
 
@@ -364,7 +341,7 @@ ECloud 使用 Emacs Transient library 提供階層式選單介面，類似 Magit
 
 ### 主選單
 
-執行 `M-x ecloud` 開啟主選單，顯示所有可用的 GCP 服務：
+執行 `M-x ecloud-menu` 開啟主選單，顯示所有可用的 GCP 服務：
 
 ```
 Google Cloud Platform Services
@@ -413,12 +390,12 @@ Q  Quit
 
 ## Kubernetes (GKE)
 
-使用 `M-x ecloud-k8s-list` 或透過 Transient Menu (`M-x ecloud` → `k`) 管理 GKE Clusters。連線後可檢視 Pods, Services, Ingresses, Deployments, Helm Releases 等資源。
+使用 `M-x ecloud-k8s-list` 或透過 Transient Menu (`M-x ecloud-menu` → `k`) 管理 GKE Clusters。連線後可檢視 Pods, Services, Ingresses, Deployments, Helm Releases 等資源。
 
 ### 支援功能
 - **多視圖切換**：Pods (`p`), Services (`s`), Ingresses (`i`), Deployments (`d`), Namespaces (`n`), Helm Releases (`h`)。
 - **日誌串流**：即時查看 Pod Logs (WebSocket)。
-- **互動式 Shell**：使用 vterm 進入 Pod 執行命令 (類似 `kubectl exec -it`)。
+- **互動式 Shell**：進入 Pod 執行命令 (類似 `kubectl exec -it`)。
 - **YAML 檢視**：快速查看資源定義。
 - **Helm 管理**：安裝、升級、回滾、卸載 Helm releases。
 
@@ -435,21 +412,20 @@ Q  Quit
 | `l` | 查看 Logs (靜態) |
 | `L` | 開始 Logs Streaming |
 | `e` | 執行單次命令 (同步) |
-| `E` | 進入互動式 Shell (vterm) |
+| `E` | 進入互動式 Shell |
 | `r` | 重新整理 |
 | `Q` | 斷開 Cluster 連線 |
 | `q` | 關閉視窗 |
 
-### 互動式 Pod Shell (vterm)
+### 互動式 Pod Shell
 
 在 Pods 列表中按 `E` 可以進入互動式 shell，就像使用 `kubectl exec -it` 一樣：
 
-- 使用 vterm 提供完整的終端模擬
 - 支援多容器 Pod（會提示選擇容器）
-- 自動處理 WebSocket 雙向通信
+- 透過 WebSocket 雙向通信
 - 關閉 buffer 時自動清理會話
 
-這個功能類似於 Compute Engine 的 SSH 功能，讓你可以直接在 Emacs 中操作 Pod 內的 shell。
+這個功能讓你可以直接在 Emacs 中操作 Pod 內的 shell。
 
 ### 大型叢集效能優化
 
@@ -562,7 +538,7 @@ uv run uvicorn main:app --port 8765
 
 有三種方式進入 Helm 管理介面：
 
-1. **透過 Transient Menu**: `M-x ecloud` → `k` (Kubernetes) → `h` (Helm Releases)
+1. **透過 Transient Menu**: `M-x ecloud-menu` → `k` (Kubernetes) → `h` (Helm Releases)
 2. **透過 K8s 視圖**: 在任何 K8s 資源列表中按 `h`
 3. **直接指令**: `M-x ecloud-k8s-helm-list`
 
@@ -1158,26 +1134,7 @@ gcloud iam service-accounts add-iam-policy-binding [SA_EMAIL] \
 **改善方法**:
 1. 使用 namespace 過濾減少查詢範圍
 2. 檢查 cluster 健康狀態
-3. 考慮使用本地 kubeconfig 快取
 
-## 故障排除
-
-如果遇到問題，請參考：
-
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - 完整的故障排除指南
-  - K8s 連接問題（VPN、timeout 等）
-  - Pod exec vterm 問題
-  - 一般問題和診斷工具
-
-- **[VPN_WORKAROUND.md](VPN_WORKAROUND.md)** - VPN 連接問題詳解
-  - 為什麼 k9s 可以工作但 ECloud 不行
-  - 網路架構差異說明
-  - 解決方案和替代方案
-
-- **診斷工具**:
-  ```bash
-  python3 diagnose_k8s_connection.py
-  ```
 
 常見問題：
 - **連接超時**: 檢查 VPN 是否已連接

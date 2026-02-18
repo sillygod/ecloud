@@ -63,6 +63,20 @@ existing ecloud-server-url configuration for backward compatibility."
   :type '(alist :key-type symbol :value-type string)
   :group 'ecloud-account)
 
+(defcustom ecloud-server-directory nil
+  "Path to the ecloud Python server directory.
+
+When nil, the account manager will try to auto-detect the server
+directory by looking relative to the elisp files.  When installed
+via straight.el or other package managers that copy only the elisp
+files, auto-detection may fail.  In that case, set this to the
+absolute path of the server/ directory in your ecloud checkout.
+
+Example:
+  (setq ecloud-server-directory \"/path/to/ecloud/server\")"
+  :type '(choice (const nil) directory)
+  :group 'ecloud-account)
+
 (defcustom ecloud-port-range '(8765 . 8774)
   "Port range for server processes.
 
@@ -86,7 +100,7 @@ Do not set this manually; it is managed by the account manager."
   :type '(choice (const nil) symbol)
   :group 'ecloud-account)
 
-(defcustom ecloud-auto-connect-last-account t
+(defcustom ecloud-auto-connect-last-account nil
   "Whether to automatically connect to the last used account on startup.
 
 When non-nil, ECloud will attempt to connect to the account specified
@@ -311,53 +325,55 @@ Side effects:
 ;;; Configuration Parser Functions
 
 (defun ecloud-account--get-server-directory ()
-  "Find the server directory relative to the emacs directory.
+  "Find the server directory.
 Returns the absolute path to the server directory.
-Signals an error if the server directory or main.py cannot be found."
-  (let* ((emacs-dir (cond
-                     ;; When loaded from a file
-                     (load-file-name
-                      (file-name-directory load-file-name))
-                     ;; When in a buffer
-                     (buffer-file-name
-                      (file-name-directory buffer-file-name))
-                     ;; Fallback: try to find ecloud.el in load-path
-                     (t
-                      (let ((ecloud-file (locate-library "ecloud")))
-                        (when ecloud-file
-                          (file-name-directory ecloud-file))))))
-         ;; Go up one level from emacs/ to project root, then into server/
-         (project-root (when emacs-dir (expand-file-name ".." emacs-dir)))
-         (server-dir (when project-root (expand-file-name "server" project-root)))
+Signals an error if the server directory or main.py cannot be found.
+
+Search order:
+1. `ecloud-server-directory' custom variable (if set)
+2. Relative to elisp file location (../server/) - works for manual install
+3. Same directory as elisp files (server/) - works for straight.el with server in :files"
+  (let* ((server-dir
+          (or
+           ;; 1. User-configured path
+           (and ecloud-server-directory
+                (expand-file-name ecloud-server-directory))
+           ;; 2. Relative to elisp files - up one level (manual install: emacs/../server/)
+           (let ((emacs-dir (cond
+                             (load-file-name
+                              (file-name-directory load-file-name))
+                             (buffer-file-name
+                              (file-name-directory buffer-file-name))
+                             (t
+                              (let ((f (locate-library "ecloud")))
+                                (when f (file-name-directory f)))))))
+             (when emacs-dir
+               (let ((dir (expand-file-name "server" (expand-file-name ".." emacs-dir))))
+                 (when (file-directory-p dir) dir))))
+           ;; 3. Same directory as elisp files (straight.el copies server/ alongside .el files)
+           (let ((lib (locate-library "ecloud")))
+             (when lib
+               (let ((dir (expand-file-name "server" (file-name-directory lib))))
+                 (when (file-directory-p dir) dir))))))
          (main-py (when server-dir (expand-file-name "main.py" server-dir))))
-    
+
     (unless server-dir
-      (ecloud-account--error
-       'server-directory-not-found
-       "Cannot determine server directory location"
-       nil
-       '("Ensure ecloud is properly installed"
-         "Check that the emacs/ directory structure is intact"
-         "Try reinstalling ecloud")))
-    
-    (unless (file-directory-p server-dir)
       (ecloud-account--error
        'server-directory-missing
        "Server directory not found"
-       (list :expected-path server-dir)
-       '("Ensure the server/ directory exists in the ecloud installation"
-         "Check that ecloud was installed completely"
-         "Try reinstalling ecloud")))
-    
+       nil
+       '("Set ecloud-server-directory to the path of ecloud/server/"
+         "Example: (setq ecloud-server-directory \"/path/to/ecloud/server\")"
+         "Or ensure the server/ directory exists in the ecloud installation")))
+
     (unless (file-exists-p main-py)
       (ecloud-account--error
        'server-main-missing
        "Server main.py not found"
        (list :expected-path main-py)
        '("Ensure the server/main.py file exists"
-         "Check that the server code is installed"
-         "Try reinstalling ecloud")))
-    
+         "Check that the server code is installed")))
+
     server-dir))
 
 (defun ecloud-account--validate-service-account (path)
@@ -1961,7 +1977,7 @@ Commands:
 ;; Evil mode integration
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-account-list-mode 'motion)
-  (evil-define-key 'motion ecloud-account-list-mode-map
+  (evil-define-key* 'motion ecloud-account-list-mode-map
     (kbd "RET") #'ecloud-account-list-switch
     (kbd "c")   #'ecloud-account-list-connect
     (kbd "d")   #'ecloud-account-list-disconnect

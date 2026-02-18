@@ -1424,7 +1424,7 @@ Similar to kubectl api-resources output."
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-k8s-mode 'motion)
-  (evil-define-key 'motion ecloud-k8s-mode-map
+  (evil-define-key* 'motion ecloud-k8s-mode-map
     (kbd "RET") #'ecloud-k8s-enter
     (kbd "p") #'ecloud-k8s-switch-to-pods
     (kbd "s") #'ecloud-k8s-switch-to-services
@@ -1577,7 +1577,7 @@ Similar to kubectl api-resources output."
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-helm-history-mode 'motion)
-  (evil-define-key 'motion ecloud-helm-history-mode-map
+  (evil-define-key* 'motion ecloud-helm-history-mode-map
     (kbd "r") #'ecloud-k8s-helm-history-rollback
     (kbd "g") #'ecloud-k8s-helm-history-refresh
     (kbd "?") #'ecloud-k8s-helm-history-help
@@ -1619,7 +1619,7 @@ Similar to kubectl api-resources output."
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-helm-list-mode 'motion)
-  (evil-define-key 'motion ecloud-helm-list-mode-map
+  (evil-define-key* 'motion ecloud-helm-list-mode-map
     (kbd "RET") #'ecloud-k8s-helm-describe
     (kbd "i") #'ecloud-k8s-helm-install
     (kbd "u") #'ecloud-k8s-helm-upgrade

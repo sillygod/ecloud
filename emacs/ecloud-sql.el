@@ -250,7 +250,7 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-sql-mode 'motion)
-  (evil-define-key 'motion ecloud-sql-mode-map
+  (evil-define-key* 'motion ecloud-sql-mode-map
     (kbd "d") #'ecloud-sql-show-databases
     (kbd "u") #'ecloud-sql-show-users
     (kbd "b") #'ecloud-sql-show-backups

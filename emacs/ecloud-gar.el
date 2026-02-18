@@ -348,7 +348,7 @@ Returns t if confirmed."
 ;;; Evil mode
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-gar-mode 'motion)
-  (evil-define-key 'motion ecloud-gar-mode-map
+  (evil-define-key* 'motion ecloud-gar-mode-map
     (kbd "RET") #'ecloud-gar-enter
     (kbd "^")   #'ecloud-gar-up
     (kbd "r")   #'ecloud-gar-refresh

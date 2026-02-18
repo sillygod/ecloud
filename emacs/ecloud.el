@@ -1,12 +1,12 @@
-;;; ecloud.el --- Emacs interface to Google Cloud Storage -*- lexical-binding: t; -*-
+;;; ecloud.el --- Emacs interface to Google Cloud Platform -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024
 
 ;; Author: jing
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "27.1"))
-;; Keywords: tools, cloud, gcs, google
-;; URL: https://github.com/user/ecloud
+;; Package-Requires: ((emacs "27.1") (posframe "1.0.0") (websocket "1.12") (transient "0.3.0"))
+;; Keywords: tools, cloud, gcp, google
+;; URL: https://github.com/sillygod/ecloud
 
 ;;; Commentary:
 
@@ -94,6 +94,14 @@
 (require 'ecloud-services)
 (require 'ecloud-transient)
 (require 'ecloud-account-manager)
+
+;; Deferred WebSocket auto-connect (avoid errors during package load)
+(when ecloud-ws-auto-connect
+  (run-with-idle-timer 2 nil
+    (lambda ()
+      (condition-case nil
+          (ecloud-ws-connect)
+        (error (message "ECloud WebSocket: Could not connect automatically."))))))
 
 ;;; User customization
 

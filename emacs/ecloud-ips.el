@@ -212,7 +212,7 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-ips-mode 'motion)
-  (evil-define-key 'motion ecloud-ips-mode-map
+  (evil-define-key* 'motion ecloud-ips-mode-map
     (kbd "r")   #'ecloud-ips-refresh
     (kbd "+")   #'ecloud-ips-reserve
     (kbd "c")   #'ecloud-ips-copy-address

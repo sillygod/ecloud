@@ -446,7 +446,7 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-browser-mode 'motion)
-  (evil-define-key 'motion ecloud-browser-mode-map
+  (evil-define-key* 'motion ecloud-browser-mode-map
     (kbd "RET") #'ecloud-browser-enter
     (kbd "^")   #'ecloud-browser-up
     (kbd "r")   #'ecloud-browser-refresh

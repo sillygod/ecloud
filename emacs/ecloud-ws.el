@@ -159,10 +159,4 @@ Functions are called with (DATA) containing stream_id, pod, container, line.")
 Functions are called with (TYPE DATA).")
 
 (provide 'ecloud-ws)
-
-;; Auto-connect
-(when ecloud-ws-auto-connect
-  (condition-case nil
-      (ecloud-ws-connect)
-    (error (message "ECloud WebSocket: Could not connect automatically."))))
 ;;; ecloud-ws.el ends here

@@ -300,7 +300,7 @@ If nil, checks the server configuration or defaults to user identity."
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'ecloud-compute-mode 'motion)
-  (evil-define-key 'motion ecloud-compute-mode-map
+  (evil-define-key* 'motion ecloud-compute-mode-map
     (kbd "RET") #'ecloud-compute-ssh
     (kbd "s")   #'ecloud-compute-ssh
     (kbd "S")   #'ecloud-compute-start-instance
