@@ -48,6 +48,13 @@
 (declare-function ecloud-account-switch "ecloud-account-manager")
 (declare-function ecloud-account-list-processes "ecloud-account-manager")
 (declare-function ecloud-account-current "ecloud-account-manager")
+(declare-function ecloud-secrets-list "ecloud-secrets")
+(declare-function ecloud-secrets-access "ecloud-secrets")
+(declare-function ecloud-secrets-create "ecloud-secrets")
+(declare-function ecloud-secrets-add-version "ecloud-secrets")
+(declare-function ecloud-secrets-delete "ecloud-secrets")
+(declare-function ecloud-notify-dismiss-all "ecloud-notify")
+(declare-function ecloud-notify-show-log "ecloud-notify")
 
 ;; Forward declarations for variables
 (defvar ecloud-k8s--current-cluster)
@@ -103,10 +110,14 @@ ecloud-* commands directly for quick access."
    ["Networking & Registry"
     ("i" "IP Addresses" ecloud-ips-list)
     ("a" "Artifact Registry" ecloud-gar-browse)]
+   ["Security"
+    ("m" "Secret Manager" ecloud-secrets-menu)]
    ["Account Management"
     ("A" "Switch Account" ecloud-account-switch)
     ("L" "List Accounts" ecloud-account-list-processes)]]
   ["Actions"
+   ("d" "Dismiss notifications" ecloud-notify-dismiss-all)
+   ("N" "Notification log" ecloud-notify-show-log)
    ("q" "Quit" transient-quit-one)])
 
 ;;; Kubernetes Submenu
@@ -135,6 +146,25 @@ Shows current cluster connection status in the menu header."
    ["Cluster Actions"
     ("c" "Connect/Switch cluster" ecloud-k8s-switch-cluster)
     ("D" "Disconnect" ecloud-k8s-disconnect)]]
+  ["Navigation"
+   ("q" "Back to main menu" ecloud-menu)
+   ("Q" "Quit" transient-quit-one)])
+
+;;; Secret Manager Submenu
+
+;;;###autoload
+(transient-define-prefix ecloud-secrets-menu ()
+  "Secret Manager management menu."
+  [:description
+   (lambda () "Secret Manager")
+   :class transient-columns
+   ["Browse"
+    ("l" "List secrets" ecloud-secrets-list)
+    ("a" "Access secret (read payload)" ecloud-secrets-access)]
+   ["Modify"
+    ("c" "Create secret" ecloud-secrets-create)
+    ("v" "Add new version" ecloud-secrets-add-version)
+    ("D" "Delete secret" ecloud-secrets-delete)]]
   ["Navigation"
    ("q" "Back to main menu" ecloud-menu)
    ("Q" "Quit" transient-quit-one)])

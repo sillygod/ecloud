@@ -18,6 +18,7 @@ dependencies = [
     "cloud-sql-python-connector>=1.0.0",
     "google-cloud-container>=2.0.0",
     "google-cloud-service-usage>=1.15.0",
+    "google-cloud-secret-manager>=2.16.0",
     "kubernetes>=29.0.0",
     "PyYAML>=6.0.0",
     "pyhelm3>=0.4.0",

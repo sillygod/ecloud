@@ -92,6 +92,7 @@
 (require 'ecloud-k8s)
 (require 'ecloud-ws)
 (require 'ecloud-services)
+(require 'ecloud-secrets)
 (require 'ecloud-transient)
 (require 'ecloud-account-manager)
 
@@ -167,6 +168,38 @@
 ;;;###autoload
 (autoload 'ecloud-services-get-info "ecloud-services"
   "Get detailed information about a GCP service/API." t)
+
+;;;###autoload
+(autoload 'ecloud-secrets-list "ecloud-secrets"
+  "List GCP Secret Manager secrets." t)
+
+;;;###autoload
+(autoload 'ecloud-secrets-access "ecloud-secrets"
+  "Access a Secret Manager secret payload." t)
+
+;;;###autoload
+(autoload 'ecloud-secrets-create "ecloud-secrets"
+  "Create a new Secret Manager secret." t)
+
+;;;###autoload
+(autoload 'ecloud-secrets-add-version "ecloud-secrets"
+  "Add a new version to a Secret Manager secret." t)
+
+;;;###autoload
+(autoload 'ecloud-secrets-delete "ecloud-secrets"
+  "Delete a Secret Manager secret." t)
+
+;;;###autoload
+(autoload 'ecloud-notify-dismiss-all "ecloud-notify"
+  "Dismiss all visible ecloud notifications." t)
+
+;;;###autoload
+(autoload 'ecloud-notify-show-log "ecloud-notify"
+  "Open the ecloud notification history log." t)
+
+;;;###autoload
+(autoload 'ecloud-notify-clear-log "ecloud-notify"
+  "Clear the ecloud notification history log." t)
 
 ;;;###autoload
 (autoload 'ecloud-download-file "ecloud-commands"

@@ -107,6 +107,27 @@ Returns the result on success, signals an error on failure."
             (error "%s" formatted-msg)))
       result)))
 
+(defun ecloud-rpc--quick-health-check ()
+  "Return non-nil if the current server URL's /health responds within 2s.
+Used by `ecloud-rpc-request' to decide whether a failed/timed-out
+synchronous request is a real server outage (restart appropriate)
+or just a slow RPC (server is alive, do NOT restart). Without this
+guard, any sync RPC exceeding `ecloud-request-timeout' would kill
+and respawn the local server."
+  (require 'url)
+  (let* ((rpc-url (ecloud-rpc--get-current-url))
+         (health-url (replace-regexp-in-string
+                      "/jsonrpc/?\\'" "/health" rpc-url)))
+    (condition-case _
+        (let ((buf (url-retrieve-synchronously health-url nil nil 2)))
+          (when buf
+            (unwind-protect
+                (with-current-buffer buf
+                  (goto-char (point-min))
+                  (re-search-forward "HTTP/[0-9.]+ 200" nil t))
+              (kill-buffer buf))))
+      (error nil))))
+
 ;;; Public API
 
 (defun ecloud-rpc-request (method &optional params)
@@ -152,9 +173,14 @@ original error is signaled."
          (setq original-error err)
          
          ;; Try to handle the connection error if account manager is available
-         ;; and we haven't exceeded retry limit
+         ;; and we haven't exceeded retry limit. Crucially, verify the
+         ;; server is actually down via a quick /health probe before
+         ;; tearing it down — otherwise a slow RPC (e.g. pod exec) that
+         ;; merely exceeded `ecloud-request-timeout' would falsely kill
+         ;; a perfectly healthy server.
          (if (and (< retry-count max-retries)
-                  (fboundp 'ecloud-account--handle-connection-error))
+                  (fboundp 'ecloud-account--handle-connection-error)
+                  (not (ecloud-rpc--quick-health-check)))
              (progn
                ;; Attempt to restart the server
                (condition-case restart-err
@@ -729,12 +755,25 @@ LIMIT can be used to restrict the number of pods returned for performance."
     (when container (setq params (plist-put params :container container)))
     (plist-get (ecloud-rpc-request "k8s_pod_exec" params) :output)))
 
-(defun ecloud-rpc-k8s-pod-exec-interactive (namespace pod-name &optional container command)
-  "Start interactive pod exec session. Returns session-id."
+(defun ecloud-rpc-k8s-pod-exec-interactive (namespace pod-name &optional container command rows cols)
+  "Start interactive pod exec session. Returns plist with :session_id.
+ROWS and COLS, if provided, set the remote shell's initial terminal
+dimensions so full-screen tools (vi, top) lay out correctly."
   (let ((params (list :namespace namespace :pod_name pod-name)))
     (when container (setq params (plist-put params :container container)))
     (when command (setq params (plist-put params :command command)))
+    (when rows (setq params (plist-put params :rows rows)))
+    (when cols (setq params (plist-put params :cols cols)))
     (ecloud-rpc-request "k8s_pod_exec_interactive" params)))
+
+(defun ecloud-rpc-k8s-pod-exec-resize-async (session-id rows cols &optional callback error-callback)
+  "Notify exec SESSION-ID of new ROWS/COLS asynchronously.
+Fire-and-forget; no UI block on every window resize."
+  (ecloud-rpc-request-async
+   "k8s_pod_exec_resize"
+   (or callback #'ignore)
+   (list :session_id session-id :rows rows :cols cols)
+   error-callback))
 
 (defun ecloud-rpc-k8s-pod-exec-send-input (session-id input)
   "Send input to exec session."
@@ -924,6 +963,44 @@ FILTER-STATE can be \"ENABLED\", \"DISABLED\", or nil for all."
 (defun ecloud-rpc-service-usage-get-service (service-name)
   "Get details of a specific GCP service/API SERVICE-NAME."
   (ecloud-rpc-request "service_usage_get_service" (list :service_name service-name)))
+
+;;; Secret Manager Operations
+
+(defun ecloud-rpc-secret-manager-list-secrets-async (callback &optional error-callback)
+  "List all secrets in the current project asynchronously."
+  (ecloud-rpc-request-async "secret_manager_list_secrets" callback nil error-callback))
+
+(defun ecloud-rpc-secret-manager-list-secrets ()
+  "List all secrets in the current project (synchronous)."
+  (ecloud-rpc-request "secret_manager_list_secrets" nil))
+
+(defun ecloud-rpc-secret-manager-access-version-async (name version callback &optional error-callback)
+  "Access secret NAME at VERSION (default \"latest\") asynchronously."
+  (ecloud-rpc-request-async "secret_manager_access_version"
+                            callback
+                            (list :name name :version (or version "latest"))
+                            error-callback))
+
+(defun ecloud-rpc-secret-manager-create-secret-async (name payload callback &optional error-callback)
+  "Create secret NAME with initial PAYLOAD asynchronously."
+  (ecloud-rpc-request-async "secret_manager_create_secret"
+                            callback
+                            (list :name name :payload payload)
+                            error-callback))
+
+(defun ecloud-rpc-secret-manager-add-version-async (name payload callback &optional error-callback)
+  "Add a new version with PAYLOAD to existing secret NAME asynchronously."
+  (ecloud-rpc-request-async "secret_manager_add_version"
+                            callback
+                            (list :name name :payload payload)
+                            error-callback))
+
+(defun ecloud-rpc-secret-manager-delete-secret-async (name callback &optional error-callback)
+  "Delete secret NAME asynchronously."
+  (ecloud-rpc-request-async "secret_manager_delete_secret"
+                            callback
+                            (list :name name)
+                            error-callback))
 
 (provide 'ecloud-rpc)
 ;;; ecloud-rpc.el ends here

@@ -22,6 +22,7 @@ from helm_client import get_helm_client, HelmClient, reset_helm_client
 from cloud_run_client import get_cloud_run_client, CloudRunClient
 from cloud_scheduler_client import get_cloud_scheduler_client, CloudSchedulerClient
 from service_usage_client import get_service_usage_client, ServiceUsageClient
+from secret_manager_client import get_secret_manager_client, SecretManagerClient
 from config import config
 from websocket_manager import get_manager
 from error_handler import (
@@ -49,6 +50,7 @@ HELM_ERROR = -32006
 CLOUD_RUN_ERROR = -32007
 CLOUD_SCHEDULER_ERROR = -32008
 SERVICE_USAGE_ERROR = -32009
+SECRET_MANAGER_ERROR = -32010
 
 
 class JsonRpcRequest(BaseModel):
@@ -155,6 +157,7 @@ class JsonRpcHandler:
             "k8s_list_log_streams": self._k8s_list_log_streams,
             "k8s_pod_exec_interactive": self._k8s_pod_exec_interactive,
             "k8s_pod_exec_send_input": self._k8s_pod_exec_send_input,
+            "k8s_pod_exec_resize": self._k8s_pod_exec_resize,
             "k8s_pod_exec_stop_session": self._k8s_pod_exec_stop_session,
             "k8s_pod_exec_list_sessions": self._k8s_pod_exec_list_sessions,
             "k8s_get_resources": self._k8s_get_resources,
@@ -181,6 +184,7 @@ class JsonRpcHandler:
             # Cloud Scheduler methods
             "cloud_scheduler_list_locations": self._cloud_scheduler_list_locations,
             "cloud_scheduler_list_jobs": self._cloud_scheduler_list_jobs,
+            "cloud_scheduler_list_all_jobs": self._cloud_scheduler_list_all_jobs,
             "cloud_scheduler_get_job": self._cloud_scheduler_get_job,
             "cloud_scheduler_create_http_job": self._cloud_scheduler_create_http_job,
             "cloud_scheduler_create_pubsub_job": self._cloud_scheduler_create_pubsub_job,
@@ -195,6 +199,12 @@ class JsonRpcHandler:
             "service_usage_enable_service": self._service_usage_enable_service,
             "service_usage_disable_service": self._service_usage_disable_service,
             "service_usage_get_service": self._service_usage_get_service,
+            # Secret Manager methods
+            "secret_manager_list_secrets": self._secret_manager_list_secrets,
+            "secret_manager_access_version": self._secret_manager_access_version,
+            "secret_manager_create_secret": self._secret_manager_create_secret,
+            "secret_manager_add_version": self._secret_manager_add_version,
+            "secret_manager_delete_secret": self._secret_manager_delete_secret,
             # System
             "ping": self._ping,
             "get_config": self._get_config,
@@ -1077,21 +1087,29 @@ class JsonRpcHandler:
         client = self._get_k8s_client()
         return client.scale_deployment(namespace, name, int(replicas))
 
-    def _k8s_pod_exec(self, params: dict) -> dict:
-        """Execute a command in a pod."""
+    async def _k8s_pod_exec(self, params: dict) -> dict:
+        """Execute a command in a pod.
+
+        The underlying kubernetes.stream call blocks until the command
+        completes, so it MUST run off the asyncio event loop — otherwise
+        a slow command would freeze every other endpoint (including
+        /health, which emacs uses to decide whether the server is alive).
+        """
         namespace = params.get("namespace")
         name = params.get("name")
         command = params.get("command")
         container = params.get("container")
-        
+
         if not namespace or not name or not command:
             raise TypeError("Missing required parameters: namespace, name, command")
-            
+
         if isinstance(command, str):
             command = [command]
-            
+
         client = self._get_k8s_client()
-        output = client.pod_exec(namespace, name, command, container)
+        output = await asyncio.to_thread(
+            client.pod_exec, namespace, name, command, container
+        )
         return {"output": output}
 
     def _k8s_apply_manifest(self, params: dict) -> dict:
@@ -1198,13 +1216,15 @@ class JsonRpcHandler:
         pod_name = params.get("pod_name")
         container = params.get("container")
         command = params.get("command")  # Optional, defaults to ["/bin/sh"]
-        
+        rows = params.get("rows")
+        cols = params.get("cols")
+
         if not namespace or not pod_name:
             raise TypeError("Missing required parameters: namespace, pod_name")
-        
+
         if command and isinstance(command, str):
             command = [command]
-        
+
         async def on_output(session_id: str, output: str):
             await get_manager().broadcast({
                 "type": "k8s_exec_output",
@@ -1213,7 +1233,17 @@ class JsonRpcHandler:
                     "output": output,
                 }
             })
-        
+
+        async def on_close(session_id: str):
+            # Fired when the read loop exits — e.g. the user typed
+            # `exit', the shell received a SIGHUP, or the underlying
+            # ws_stream went down. Clients use this to flip their
+            # buffer into a "session closed" state.
+            await get_manager().broadcast({
+                "type": "k8s_exec_session_stopped",
+                "data": {"session_id": session_id}
+            })
+
         streamer = self._get_pod_exec_streamer()
         session_id = await streamer.start_exec_session(
             namespace=namespace,
@@ -1221,6 +1251,9 @@ class JsonRpcHandler:
             container=container,
             command=command,
             on_output=on_output,
+            on_close=on_close,
+            rows=rows,
+            cols=cols,
         )
         
         # Broadcast session started
@@ -1236,6 +1269,26 @@ class JsonRpcHandler:
         
         return {"session_id": session_id}
     
+    async def _k8s_pod_exec_resize(self, params: dict) -> dict:
+        """Notify an exec session of a terminal resize.
+
+        Forwards Height/Width on the k8s exec resize channel so tools
+        like vi, top, less re-layout for the client's current window.
+        Silent no-op if the session no longer exists (race with stop).
+        """
+        session_id = params.get("session_id")
+        rows = params.get("rows")
+        cols = params.get("cols")
+
+        if not session_id:
+            raise TypeError("Missing parameter: session_id")
+        if not rows or not cols:
+            raise TypeError("Missing parameters: rows, cols")
+
+        streamer = self._get_pod_exec_streamer()
+        ok = await streamer.resize(session_id, int(rows), int(cols))
+        return {"success": ok}
+
     async def _k8s_pod_exec_send_input(self, params: dict) -> dict:
         """Send input to exec session."""
         session_id = params.get("session_id")
@@ -1647,7 +1700,7 @@ class JsonRpcHandler:
     def _cloud_scheduler_list_jobs(self, params: dict) -> dict:
         """List Cloud Scheduler jobs in a location."""
         location = params.get("location", "us-central1")
-        
+
         try:
             client = self._get_cloud_scheduler_client()
             jobs = client.list_jobs(location)
@@ -1657,6 +1710,53 @@ class JsonRpcHandler:
             }
         except Exception as e:
             raise RuntimeError(f"CloudSchedulerError: Failed to list jobs: {e}")
+
+    async def _cloud_scheduler_list_all_jobs(self, params: dict) -> dict:
+        """List Cloud Scheduler jobs across all valid project locations in parallel.
+
+        Locations are discovered via the ListLocations API (cached on the
+        client). Per-location ListJobs calls are fanned out concurrently
+        with ``asyncio.gather`` so total latency is bounded by the slowest
+        single region rather than the sum of all of them.
+
+        Per-location failures are isolated: a 403/404 in one location
+        doesn't break the whole scan; the error is surfaced under
+        ``errors`` so the client can show it without aborting.
+        """
+        try:
+            client = self._get_cloud_scheduler_client()
+            locations = await asyncio.to_thread(client.list_locations)
+
+            async def fetch(loc: str):
+                try:
+                    jobs = await asyncio.to_thread(client.list_jobs, loc)
+                    return loc, jobs, None
+                except Exception as e:
+                    return loc, [], str(e)
+
+            results = await asyncio.gather(*(fetch(loc) for loc in locations))
+
+            all_jobs: list[dict] = []
+            errors: dict[str, str] = {}
+            for loc, jobs, err in results:
+                if err is not None:
+                    errors[loc] = err
+                    continue
+                for j in jobs:
+                    d = j.to_dict()
+                    d["location"] = loc
+                    all_jobs.append(d)
+
+            return {
+                "jobs": all_jobs,
+                "count": len(all_jobs),
+                "locationsScanned": len(locations),
+                "errors": errors,
+            }
+        except Exception as e:
+            raise RuntimeError(
+                f"CloudSchedulerError: Failed to list jobs across locations: {e}"
+            )
 
     def _cloud_scheduler_get_job(self, params: dict) -> dict:
         """Get details of a specific Cloud Scheduler job."""
@@ -1986,16 +2086,125 @@ class JsonRpcHandler:
     def _service_usage_get_service(self, params: dict) -> dict:
         """Get details of a specific GCP service/API."""
         service_name = params.get("service_name")
-        
+
         if not service_name:
             raise TypeError("Missing required parameter: service_name")
-        
+
         try:
             client = self._get_service_usage_client()
             service = client.get_service(service_name)
             return {"service": service.to_dict()}
         except Exception as e:
             raise RuntimeError(f"ServiceUsageError: Failed to get service '{service_name}': {e}")
+
+    # ===== Secret Manager Methods =====
+
+    def _get_secret_manager_client(self) -> SecretManagerClient:
+        """Get or create Secret Manager client."""
+        return get_secret_manager_client()
+
+    async def _secret_manager_list_secrets(self, params: dict) -> dict:
+        """List all secrets in the project."""
+        try:
+            client = self._get_secret_manager_client()
+            secrets = await asyncio.to_thread(client.list_secrets)
+            return {
+                "secrets": [s.to_dict() for s in secrets],
+                "count": len(secrets),
+                "project": client.project,
+            }
+        except Exception as e:
+            raise RuntimeError(f"SecretManagerError: Failed to list secrets: {e}")
+
+    async def _secret_manager_access_version(self, params: dict) -> dict:
+        """Access (read) a secret version's payload."""
+        name = params.get("name")
+        version = params.get("version", "latest")
+
+        if not name:
+            raise TypeError("Missing required parameter: name")
+
+        try:
+            client = self._get_secret_manager_client()
+            result = await asyncio.to_thread(
+                client.access_secret_version, name, version
+            )
+            return result
+        except Exception as e:
+            raise RuntimeError(
+                f"SecretManagerError: Failed to access secret '{name}': {e}"
+            )
+
+    async def _secret_manager_create_secret(self, params: dict) -> dict:
+        """Create a new secret with an initial payload."""
+        name = params.get("name")
+        payload = params.get("payload")
+        labels = params.get("labels") or {}
+
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        if payload is None:
+            raise TypeError("Missing required parameter: payload")
+
+        try:
+            client = self._get_secret_manager_client()
+            result = await asyncio.to_thread(
+                client.create_secret, name, payload, labels
+            )
+            await get_manager().broadcast({
+                "type": "secret_manager_secret_created",
+                "data": {"name": name},
+            })
+            return result
+        except Exception as e:
+            raise RuntimeError(
+                f"SecretManagerError: Failed to create secret '{name}': {e}"
+            )
+
+    async def _secret_manager_add_version(self, params: dict) -> dict:
+        """Add a new version to an existing secret."""
+        name = params.get("name")
+        payload = params.get("payload")
+
+        if not name:
+            raise TypeError("Missing required parameter: name")
+        if payload is None:
+            raise TypeError("Missing required parameter: payload")
+
+        try:
+            client = self._get_secret_manager_client()
+            result = await asyncio.to_thread(
+                client.add_secret_version, name, payload
+            )
+            await get_manager().broadcast({
+                "type": "secret_manager_version_added",
+                "data": {"name": name, "version": result.get("version")},
+            })
+            return result
+        except Exception as e:
+            raise RuntimeError(
+                f"SecretManagerError: Failed to add version to '{name}': {e}"
+            )
+
+    async def _secret_manager_delete_secret(self, params: dict) -> dict:
+        """Delete a secret and all its versions."""
+        name = params.get("name")
+
+        if not name:
+            raise TypeError("Missing required parameter: name")
+
+        try:
+            client = self._get_secret_manager_client()
+            result = await asyncio.to_thread(client.delete_secret, name)
+            await get_manager().broadcast({
+                "type": "secret_manager_secret_deleted",
+                "data": {"name": name},
+            })
+            return result
+        except Exception as e:
+            raise RuntimeError(
+                f"SecretManagerError: Failed to delete secret '{name}': {e}"
+            )
 
 
 # Singleton handler instance

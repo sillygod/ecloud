@@ -2202,7 +2202,7 @@ Example:
         (erase-buffer)
         (ecloud-account-list--insert-content))
       (goto-char (point-min)))
-    (display-buffer buffer)))
+    (pop-to-buffer buffer)))
 
 ;;; Auto-Connect and Initialization
 

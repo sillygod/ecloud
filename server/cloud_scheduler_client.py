@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from google.cloud import scheduler_v1
+from google.cloud.location import locations_pb2
 from google.protobuf import duration_pb2
 
 from config import config
@@ -61,49 +62,56 @@ class CloudSchedulerClient:
         """
         self._project = project or config.gcs_project or _get_project_from_credentials()
         self._client = scheduler_v1.CloudSchedulerClient()
-    
-    def list_locations(self) -> List[str]:
-        """List available Cloud Scheduler locations.
-        
-        Returns:
-            List of location names.
-            
-        Note:
-            Cloud Scheduler is available in most Cloud Run regions.
+        self._locations_cache: Optional[List[str]] = None
+
+    # Fallback list used only if the real ListLocations API call fails
+    # (e.g. permission missing). Same hardcoded set as before.
+    _FALLBACK_LOCATIONS: List[str] = sorted([
+        # Americas
+        "us-central1", "us-east1", "us-east4",
+        "us-west1", "us-west2", "us-west3", "us-west4",
+        "northamerica-northeast1", "southamerica-east1",
+        # Europe
+        "europe-central2", "europe-north1",
+        "europe-west1", "europe-west2", "europe-west3",
+        "europe-west4", "europe-west6",
+        # Asia Pacific
+        "asia-east1", "asia-east2",
+        "asia-northeast1", "asia-northeast2", "asia-northeast3",
+        "asia-south1", "asia-southeast1", "asia-southeast2",
+        "australia-southeast1",
+    ])
+
+    def list_locations(self, force_refresh: bool = False) -> List[str]:
+        """List Cloud Scheduler locations actually enabled for this project.
+
+        Calls the Cloud Scheduler ListLocations API so we never return a
+        region that the project can't query (which used to surface as
+        400 "not a valid location" errors during all-locations scans).
+        Falls back to a hardcoded list only if the API call fails.
+
+        Result is cached on the instance; pass force_refresh=True to
+        re-query.
         """
-        # Cloud Scheduler locations (subset of Cloud Run regions)
-        locations = [
-            # Americas
-            "us-central1",
-            "us-east1",
-            "us-east4",
-            "us-west1",
-            "us-west2",
-            "us-west3",
-            "us-west4",
-            "northamerica-northeast1",
-            "southamerica-east1",
-            # Europe
-            "europe-central2",
-            "europe-north1",
-            "europe-west1",
-            "europe-west2",
-            "europe-west3",
-            "europe-west4",
-            "europe-west6",
-            # Asia Pacific
-            "asia-east1",
-            "asia-east2",
-            "asia-northeast1",
-            "asia-northeast2",
-            "asia-northeast3",
-            "asia-south1",
-            "asia-southeast1",
-            "asia-southeast2",
-            "australia-southeast1",
-        ]
-        
-        return sorted(locations)
+        if self._locations_cache is not None and not force_refresh:
+            return self._locations_cache
+
+        try:
+            request = locations_pb2.ListLocationsRequest(
+                name=f"projects/{self._project}"
+            )
+            response = self._client.list_locations(request=request)
+            locations = sorted({loc.location_id for loc in response if loc.location_id})
+            if locations:
+                self._locations_cache = locations
+                return locations
+        except Exception:
+            # Fall through to the hardcoded fallback; caller can still
+            # iterate even if the project lacks locations.list permission.
+            pass
+
+        self._locations_cache = list(self._FALLBACK_LOCATIONS)
+        return self._locations_cache
     
     def list_jobs(self, location: str = "us-central1") -> List[JobInfo]:
         """List Cloud Scheduler jobs in a location.

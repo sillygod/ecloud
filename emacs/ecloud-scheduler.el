@@ -120,36 +120,36 @@
          nil)))))
 
 (defun ecloud-scheduler--fetch-jobs-all-locations ()
-  "Fetch Cloud Scheduler jobs from all locations."
+  "Fetch Cloud Scheduler jobs from all valid locations in one RPC.
+The server fans out per-location ListJobs calls concurrently and
+returns a merged result; this replaces the older N-round-trip loop."
   (message "Fetching Cloud Scheduler jobs from all locations...")
   (condition-case err
-      (let* ((locations-response (ecloud-rpc-request "cloud_scheduler_list_locations"))
-             (locations (plist-get locations-response :locations))
-             (all-jobs nil)
-             (total-count 0))
-        
-        ;; Fetch jobs from each location
-        (dolist (location locations)
-          (condition-case loc-err
-              (let* ((response (ecloud-rpc-request "cloud_scheduler_list_jobs"
-                                                  (list :location location)))
-                     (jobs (plist-get response :jobs)))
-                (when jobs
-                  ;; Add location info to each job and collect them
-                  (dolist (job jobs)
-                    (let ((job-with-location (plist-put (copy-sequence job) :location location)))
-                      (push job-with-location all-jobs)
-                      (setq total-count (+ total-count 1))))))
-            (error
-             ;; Ignore errors for individual locations (might not have access)
-             (message "Skipping location %s: %s" location (error-message-string loc-err)))))
-        
-        (message "Found %d Cloud Scheduler job(s) across all locations" total-count)
-        (if (null all-jobs)
+      (let* ((response (ecloud-rpc-request "cloud_scheduler_list_all_jobs"))
+             (jobs (plist-get response :jobs))
+             (count (or (plist-get response :count) 0))
+             (scanned (or (plist-get response :locationsScanned) 0))
+             (errors (plist-get response :errors)))
+        ;; Surface per-location errors without aborting the whole scan.
+        (when errors
+          (let ((err-list nil))
+            ;; errors comes in as a plist (k1 v1 k2 v2 ...)
+            (while errors
+              (push (format "%s: %s"
+                            (substring (symbol-name (car errors)) 1)
+                            (cadr errors))
+                    err-list)
+              (setq errors (cddr errors)))
+            (when err-list
+              (message "Cloud Scheduler: %d location(s) failed: %s"
+                       (length err-list)
+                       (mapconcat #'identity (nreverse err-list) "; ")))))
+        (message "Found %d Cloud Scheduler job(s) across %d location(s)" count scanned)
+        (if (null jobs)
             (progn
               (message "No jobs found in any location. Press 'c' to create a new job.")
               nil)
-          (ecloud-scheduler--parse-jobs (nreverse all-jobs))))
+          (ecloud-scheduler--parse-jobs jobs)))
     (error
      (ecloud-notify-error (format "Failed to fetch Cloud Scheduler jobs: %s"
                                  (error-message-string err)))

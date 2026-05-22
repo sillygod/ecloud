@@ -1082,11 +1082,14 @@ When LIMIT is positive, fetch up to that many pods."
          (container (if (> (length containers) 1)
                         (completing-read "Container: " containers nil t)
                       (car containers)))
-         (cmd-str (read-string "Command: " "/bin/sh -c 'ls -la'")))
-    
+         (cmd-str (read-string "Command: " "ls -la"))
+         ;; `split-string-and-unquote' honours shell-style quoting so
+         ;; `/bin/sh -c "echo hi"' parses as 3 args, not 4 broken tokens.
+         (cmd (split-string-and-unquote cmd-str)))
+
     (ecloud-notify (format "Executing in %s/%s..." name container))
     ;; Exec is synchronous currently as it returns output directly
-    (let ((output (ecloud-rpc-k8s-pod-exec namespace name (split-string cmd-str) container)))
+    (let ((output (ecloud-rpc-k8s-pod-exec namespace name cmd container)))
       (if (string-empty-p output)
           (ecloud-notify "Command executed (no output)")
         (with-current-buffer (get-buffer-create "*ECloud-K8s-Exec*")
@@ -1114,12 +1117,182 @@ When LIMIT is positive, fetch up to that many pods."
   (local-set-key (kbd "C-c C-c") #'ecloud-k8s--shell-send-input)
   (add-hook 'kill-buffer-hook #'ecloud-k8s--cleanup-exec-session nil t))
 
+;;; --- Interactive Shell (vterm-backed) ---
+
+(defcustom ecloud-k8s-vterm-stub-command "tail -f /dev/null"
+  "Inert local command spawned by `vterm-mode' for k8s exec sessions.
+`vterm-mode' requires a live subprocess to initialize libvterm.
+Real shell I/O is bridged over the WebSocket; this subprocess does
+nothing and its (non-existent) output is ignored."
+  :type 'string
+  :group 'ecloud-k8s)
+
+(defvar-local ecloud-k8s--vterm-active nil
+  "Non-nil when this buffer hosts a vterm-rendered ecloud exec session.")
+
+(defvar-local ecloud-k8s--vterm-last-size nil
+  "Last (rows . cols) sent to the remote shell; used to de-dup resizes.")
+
+(defun ecloud-k8s--vterm-render (output)
+  "Feed OUTPUT bytes into the current buffer's libvterm for rendering.
+Falls back across vterm internal API names so this works on older
+and newer vterm versions; last-resort fallback inserts raw text."
+  (cond
+   ((and (fboundp 'vterm--filter)
+         (boundp 'vterm--process) (processp vterm--process))
+    (vterm--filter vterm--process output))
+   ((and (fboundp 'vterm--write-input)
+         (fboundp 'vterm--update)
+         (boundp 'vterm--vterm) vterm--vterm)
+    (vterm--write-input vterm--vterm output)
+    (vterm--update vterm--vterm))
+   (t
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert output)))))
+
+(defun ecloud-k8s--on-vterm-output (data)
+  "WebSocket callback: render exec output via libvterm in matching buffer.
+Coexists with `ecloud-k8s--on-exec-output' on the same hook; each
+no-ops for the other's buffer type."
+  (let ((session-id (plist-get data :session_id))
+        (output (plist-get data :output)))
+    (dolist (buf (buffer-list))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (when (and ecloud-k8s--vterm-active
+                     (bound-and-true-p ecloud-k8s--exec-session-id)
+                     (not (string= ecloud-k8s--exec-session-id "pending"))
+                     (equal ecloud-k8s--exec-session-id session-id))
+            (ecloud-k8s--vterm-render output)
+            ;; vterm normally relies on Emacs's natural redisplay after
+            ;; process filter returns. We come in from a WebSocket
+            ;; callback, so without nudging here a freshly-printed
+            ;; prompt can sit invisible until the user presses another
+            ;; key. `force-window-update' marks windows dirty without
+            ;; forcing an immediate paint (safer from a callback than
+            ;; `redisplay').
+            (force-window-update buf)))))))
+
+(defun ecloud-k8s--vterm-process-send-advice (orig-fn process &rest args)
+  "Route writes to an ecloud-vterm subprocess into the pod exec RPC.
+libvterm encodes keystrokes (incl. arrow keys, ^C, etc.) into a VT
+byte stream and calls `process-send-string' to send to its
+subprocess. We catch that here and forward to the pod via RPC
+instead. Non-ecloud `process-send-string' calls pass through
+untouched."
+  (let ((proc-buf (and (processp process) (process-buffer process))))
+    (if (and proc-buf (buffer-live-p proc-buf)
+             (with-current-buffer proc-buf
+               (and ecloud-k8s--vterm-active
+                    (bound-and-true-p ecloud-k8s--exec-session-id)
+                    (not (string= ecloud-k8s--exec-session-id "pending")))))
+        (let ((bytes (car args))
+              (session-id (with-current-buffer proc-buf
+                            ecloud-k8s--exec-session-id)))
+          (ecloud-rpc-k8s-pod-exec-send-input session-id bytes))
+      (apply orig-fn process args))))
+
+;; Idempotent install so `reload-ecloud' doesn't stack copies.
+(unless (advice-member-p #'ecloud-k8s--vterm-process-send-advice
+                         'process-send-string)
+  (advice-add 'process-send-string :around
+              #'ecloud-k8s--vterm-process-send-advice))
+
+(add-hook 'ecloud-k8s-exec-hook #'ecloud-k8s--on-vterm-output)
+
+(defun ecloud-k8s--on-vterm-session-stopped (type data)
+  "Mark a vterm buffer as session-closed when its remote shell ends.
+Fired by the server's `k8s_exec_session_stopped' event when the
+read loop terminates (user typed `exit', stream closed, etc).
+We:
+  1. silence the kill-buffer query that would otherwise nag about
+     the still-running local stub subprocess (`tail -f /dev/null'),
+  2. paint a clear closure marker in the buffer, and
+  3. install a buffer-local keymap so `q' / `Q' dismiss the buffer
+     without polluting the shared `vterm-mode-map'."
+  (when (string= type "k8s_exec_session_stopped")
+    (let ((session-id (plist-get data :session_id)))
+      (dolist (buf (buffer-list))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (when (and ecloud-k8s--vterm-active
+                       (bound-and-true-p ecloud-k8s--exec-session-id)
+                       (equal ecloud-k8s--exec-session-id session-id))
+              (when (and (boundp 'vterm--process) vterm--process
+                         (process-live-p vterm--process))
+                (set-process-query-on-exit-flag vterm--process nil))
+              (ecloud-k8s--vterm-render
+               "\r\n\e[7m[Session closed — press q to dismiss]\e[0m\r\n")
+              (let ((map (copy-keymap (or (current-local-map)
+                                          (make-sparse-keymap)))))
+                (define-key map (kbd "q") #'kill-current-buffer)
+                (define-key map (kbd "Q") #'kill-current-buffer)
+                (use-local-map map))
+              ;; Disconnect us from future output for this session id
+              ;; so a re-used buffer name in another session can't get
+              ;; mixed up.
+              (setq-local ecloud-k8s--vterm-active nil)
+              (force-window-update buf))))))))
+
+(add-hook 'ecloud-k8s-event-hook #'ecloud-k8s--on-vterm-session-stopped)
+
+(defun ecloud-k8s--vterm-window-size (buf)
+  "Return (rows . cols) for BUF based on its largest live window.
+Returns nil if BUF isn't currently displayed."
+  (let ((win (get-buffer-window buf t)))
+    (when win
+      (cons (window-text-height win)
+            (window-text-width win)))))
+
+(defun ecloud-k8s--vterm-push-resize ()
+  "Send the current buffer's vterm window size to the remote shell.
+Sends only when the size actually changed since last push."
+  (when (and ecloud-k8s--vterm-active
+             (bound-and-true-p ecloud-k8s--exec-session-id)
+             (not (string= ecloud-k8s--exec-session-id "pending")))
+    (let ((size (ecloud-k8s--vterm-window-size (current-buffer))))
+      (when (and size (not (equal size ecloud-k8s--vterm-last-size)))
+        (setq-local ecloud-k8s--vterm-last-size size)
+        (ecloud-rpc-k8s-pod-exec-resize-async
+         ecloud-k8s--exec-session-id (car size) (cdr size))))))
+
+(defun ecloud-k8s--vterm-on-window-size-change (frame)
+  "`window-size-change-functions' hook: push resize to any ecloud vterm buffers.
+FRAME is the frame that changed."
+  (dolist (win (window-list frame 'no-mini))
+    (let ((buf (window-buffer win)))
+      (when (and (buffer-live-p buf)
+                 (buffer-local-value 'ecloud-k8s--vterm-active buf))
+        (with-current-buffer buf
+          (ecloud-k8s--vterm-push-resize))))))
+
+(unless (memq #'ecloud-k8s--vterm-on-window-size-change
+              window-size-change-functions)
+  (add-hook 'window-size-change-functions
+            #'ecloud-k8s--vterm-on-window-size-change))
+
 (defun ecloud-k8s-pod-exec-vterm ()
-  "Execute interactive shell in pod."
+  "Open an interactive vterm-rendered shell into the pod at point.
+Uses the `vterm' package for real terminal emulation — ANSI colors,
+cursor positioning, REPL line editing, vi, top, etc. all work."
   (interactive)
   (unless (eq ecloud-k8s--current-view 'pods)
     (user-error "Exec only available for pods"))
-  
+  (unless (require 'vterm nil t)
+    (user-error "vterm package not available. Install it or use M-x ecloud-k8s-pod-exec for one-shot commands"))
+
+  ;; Ensure WS connected (the exec stream broadcasts via WS).
+  (when (and (boundp 'ecloud-ws-client) (null ecloud-ws-client)
+             (fboundp 'ecloud-ws-connect))
+    (ecloud-notify "Connecting WebSocket for shell output...")
+    (ecloud-ws-connect)
+    (let ((deadline (+ (float-time) 2.0)))
+      (while (and ecloud-ws-client
+                  (not (websocket-openp ecloud-ws-client))
+                  (< (float-time) deadline))
+        (accept-process-output nil 0.05))))
+
   (let* ((entry (tabulated-list-get-id))
          (name (plist-get entry :name))
          (namespace (plist-get entry :namespace))
@@ -1127,44 +1300,71 @@ When LIMIT is positive, fetch up to that many pods."
          (container (if (> (length containers) 1)
                         (completing-read "Container: " containers nil t)
                       (car containers)))
-         (buffer-name (format "*k8s-shell-%s/%s*" namespace name)))
-    
+         (buffer-name (format "*k8s-vterm-%s/%s*" namespace name)))
+
     (ecloud-notify (format "Starting interactive shell in %s/%s..." name container))
-    
-    ;; Kill existing buffer if any
+
     (when (get-buffer buffer-name)
       (kill-buffer buffer-name))
-    
-    ;; Create shell buffer
-    (let ((buf (get-buffer-create buffer-name)))
+
+    ;; Spawn the vterm buffer with the inert local subprocess.
+    (let ((vterm-shell ecloud-k8s-vterm-stub-command)
+          (vterm-buffer-name buffer-name))
+      (vterm))
+
+    ;; `vterm' switched us to the new buffer.
+    (let ((buf (get-buffer buffer-name)))
+      (unless (buffer-live-p buf)
+        (user-error "vterm failed to create buffer %s" buffer-name))
       (with-current-buffer buf
-        (ecloud-k8s-shell-mode)
+        (setq-local ecloud-k8s--vterm-active t)
         (setq-local ecloud-k8s--exec-session-id "pending")
-        (setq-local ecloud-k8s--input-start-marker (point-max-marker))
-        (insert (format "Connecting to %s/%s...\n" namespace name)))
-      
-      ;; Display buffer
-      (switch-to-buffer buf)
-      (goto-char (point-max))
-      
-      ;; Start exec session
-      (let ((resp (ecloud-rpc-k8s-pod-exec-interactive namespace name container)))
-        (let ((session-id (plist-get resp :session_id)))
+
+        ;; Disable vterm's 0.1s redraw batching for this buffer. Since
+        ;; we feed bytes from a WebSocket callback rather than a real
+        ;; PTY process filter, the deferred timer can leave a printed
+        ;; prompt invisible until the next keystroke.
+        (when (boundp 'vterm-timer-delay)
+          (setq-local vterm-timer-delay nil))
+
+        ;; The inert subprocess shouldn't produce output, but if it
+        ;; ever does we don't want it rendered into the buffer.
+        (when (and (boundp 'vterm--process) vterm--process)
+          (set-process-filter vterm--process #'ignore))
+
+        (add-hook 'kill-buffer-hook #'ecloud-k8s--cleanup-exec-session nil t)
+
+        ;; Capture initial window size to send up-front, so the very
+        ;; first prompt / `top' / `vi' lay out correctly.
+        (let* ((initial-size (ecloud-k8s--vterm-window-size buf))
+               (rows (and initial-size (car initial-size)))
+               (cols (and initial-size (cdr initial-size)))
+               (resp (ecloud-rpc-k8s-pod-exec-interactive
+                      namespace name container nil rows cols))
+               (session-id (plist-get resp :session_id)))
           (unless session-id
-            (with-current-buffer buf
-              (insert "\nError: Failed to start exec session\n"))
             (user-error "Failed to start exec session"))
-          
-          (if (not (buffer-live-p buf))
-              (user-error "Buffer was deleted unexpectedly")
-            
-            ;; Update session ID
-            (with-current-buffer buf
-              (setq-local ecloud-k8s--exec-session-id session-id)
-              (insert (format "Connected! Session: %s\n" session-id))
-              (set-marker ecloud-k8s--input-start-marker (point-max)))
-            
-            (ecloud-notify (format "Interactive shell started (session: %s)" session-id))))))))
+          (setq-local ecloud-k8s--exec-session-id session-id)
+          (when initial-size
+            (setq-local ecloud-k8s--vterm-last-size initial-size))
+          (ecloud-notify
+           (format "Interactive shell connected (session: %s)" session-id)))))))
+
+(defun ecloud-k8s--strip-ansi (s)
+  "Remove ANSI/VT100 control sequences from S.
+The server side opens the exec stream with tty:True so the pod's
+shell emits color, cursor, and mode-set escape sequences. We render
+into a plain `fundamental-mode' buffer which can't interpret those,
+so we strip the most common families here:
+  - CSI:    ESC [ <params> <final>     (colors, cursor moves, modes)
+  - OSC:    ESC ] <params> BEL|ESC \\   (window title etc.)
+  - Other:  ESC =  ESC >  ESC ( B      (keypad, charset)
+This is a pragmatic fallback; for full fidelity (REPL line editing,
+vi, top, etc.) the buffer would need real terminal emulation."
+  (let ((s (replace-regexp-in-string "\x1b\\][^\x07\x1b]*\\(?:\x07\\|\x1b\\\\\\)" "" s)))
+    (replace-regexp-in-string
+     "\x1b\\[[0-9;?]*[a-zA-Z]\\|\x1b[=>]\\|\x1b[()][AB012]"
+     "" s)))
 
 (defun ecloud-k8s--on-exec-output (data)
   "Handle exec output from WebSocket."
@@ -1172,6 +1372,8 @@ When LIMIT is positive, fetch up to that many pods."
         (output (plist-get data :output)))
     ;; Filter out carriage returns for cleaner display
     (setq output (replace-regexp-in-string "\r" "" output))
+    ;; Strip terminal control sequences (see `ecloud-k8s--strip-ansi').
+    (setq output (ecloud-k8s--strip-ansi output))
     (let ((found nil))
       (dolist (buf (buffer-list))
         (when (buffer-live-p buf)

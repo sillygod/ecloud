@@ -5,9 +5,10 @@ Integrates with WebSocket for real-time terminal interaction with Emacs vterm.
 """
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Optional
 from kubernetes.stream import stream
 from kubernetes.client.rest import ApiException
 
@@ -47,21 +48,27 @@ class K8sPodExecStreamer:
         container: str | None = None,
         command: list[str] | None = None,
         on_output: Callable[[str, str], Awaitable[None]] | None = None,
+        on_close: Callable[[str], Awaitable[None]] | None = None,
+        rows: Optional[int] = None,
+        cols: Optional[int] = None,
     ) -> str:
         """Start interactive exec session.
-        
+
         Args:
             namespace: Pod namespace
             pod_name: Pod name
             container: Container name (None = first container)
             command: Command to execute (default: ["/bin/sh"])
             on_output: Async callback(session_id, output_data)
-        
+            rows, cols: Initial terminal dimensions (sent on resize channel
+                       immediately after session start so the remote shell
+                       lays out output correctly for the client's window).
+
         Returns:
             session_id for managing the session
         """
         session_id = str(uuid.uuid4())
-        
+
         if command is None:
             command = ["/bin/sh"]
         
@@ -101,13 +108,48 @@ class K8sPodExecStreamer:
             ws_stream=ws_stream,
         )
         self._active_sessions[session_id] = active
-        
+
+        # Apply initial terminal size on the resize channel (4). Without
+        # this the remote shell defaults to 80x24 and full-screen tools
+        # (vi, top) render wrongly in larger client windows.
+        if rows and cols:
+            self._send_resize(ws_stream, rows, cols)
+
         # Start reading output in background
         active.read_task = asyncio.create_task(
-            self._read_output_loop(session_id, ws_stream, active.stop_event, on_output)
+            self._read_output_loop(
+                session_id, ws_stream, active.stop_event, on_output, on_close
+            )
         )
-        
+
         return session_id
+
+    @staticmethod
+    def _send_resize(ws_stream, rows: int, cols: int) -> bool:
+        """Send a resize message on the k8s exec resize channel (4).
+        Returns True on success, False if the client lacks write_channel
+        (older kubernetes libs) or the stream is closed.
+        """
+        write_channel = getattr(ws_stream, "write_channel", None)
+        if write_channel is None:
+            return False
+        try:
+            if not ws_stream.is_open():
+                return False
+            payload = json.dumps({"Height": int(rows), "Width": int(cols)})
+            write_channel(4, payload)
+            return True
+        except Exception:
+            return False
+
+    async def resize(self, session_id: str, rows: int, cols: int) -> bool:
+        """Tell the remote shell its terminal dimensions changed."""
+        if session_id not in self._active_sessions:
+            return False
+        active = self._active_sessions[session_id]
+        return await asyncio.to_thread(
+            self._send_resize, active.ws_stream, rows, cols
+        )
     
     async def _read_output_loop(
         self,
@@ -115,6 +157,7 @@ class K8sPodExecStreamer:
         ws_stream,
         stop_event: asyncio.Event,
         on_output: Callable[[str, str], Awaitable[None]] | None,
+        on_close: Callable[[str], Awaitable[None]] | None = None,
     ):
         """Read output from exec session and send to callback."""
         try:
@@ -124,15 +167,15 @@ class K8sPodExecStreamer:
                     output = ws_stream.read_stdout(timeout=0.1)
                     if output and on_output:
                         await on_output(session_id, output)
-                
+
                 if ws_stream.peek_stderr():
                     output = ws_stream.read_stderr(timeout=0.1)
                     if output and on_output:
                         await on_output(session_id, output)
-                
+
                 # Small delay to avoid busy loop
                 await asyncio.sleep(0.01)
-                
+
         except Exception as e:
             print(f"Error reading from exec session {session_id}: {e}")
             if on_output:
@@ -141,12 +184,22 @@ class K8sPodExecStreamer:
                 except Exception:
                     pass
         finally:
-            # Notify session closed
+            # Notify session closed (rendered as text in the client buffer).
             if on_output:
                 try:
                     await on_output(session_id, "\r\n[Session closed]\r\n")
                 except Exception:
                     pass
+            # Fire the structured close event so the client can flip UI
+            # state (drop kill-buffer prompt, bind a dismiss key, ...).
+            if on_close:
+                try:
+                    await on_close(session_id)
+                except Exception:
+                    pass
+            # Drop the session from the registry; the read task is
+            # ending, the ws_stream is dead, no point keeping it around.
+            self._active_sessions.pop(session_id, None)
     
     async def send_input(self, session_id: str, input_data: str):
         """Send input to exec session.
