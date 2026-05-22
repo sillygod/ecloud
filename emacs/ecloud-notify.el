@@ -194,16 +194,43 @@ By default errors are STICKY; pass TIMEOUT to override, or customise
 ;;;###autoload
 (defun ecloud-notify-dismiss-all ()
   "Dismiss all currently visible ecloud notifications.
-Useful for clearing sticky error notifications once you've read them."
+Useful for clearing sticky error notifications once you've read them.
+
+Robust against orphans left over from a previous `unload-feature' /
+`reload-ecloud': the stack variable gets makunbound and re-inited to
+nil, but the posframe child frames persist on screen. We sweep by
+buffer-name prefix and by child-frame parent so those still get
+cleaned up."
   (interactive)
-  (let ((count (length ecloud-notify--stack)))
-    (dolist (buf (copy-sequence ecloud-notify--stack))
-      (when (buffer-live-p (get-buffer buf))
-        (posframe-hide buf)
-        (kill-buffer buf)))
+  (let ((killed 0))
+    ;; Child frames showing one of our notify buffers — delete frame
+    ;; AND kill the buffer. Covers the post-reload orphan case.
+    (dolist (frame (frame-list))
+      (when (frame-parameter frame 'parent-frame)
+        (let* ((win (frame-root-window frame))
+               (buf (and win (window-buffer win))))
+          (when (and buf (buffer-live-p buf)
+                     (string-prefix-p " *ecloud-notify*" (buffer-name buf)))
+            (ignore-errors (kill-buffer buf))
+            (ignore-errors (delete-frame frame))
+            (cl-incf killed)))))
+    ;; Leftover notify buffers not currently shown in any child frame.
+    (dolist (buf (buffer-list))
+      (when (and (buffer-live-p buf)
+                 (string-prefix-p " *ecloud-notify*" (buffer-name buf)))
+        (ignore-errors (kill-buffer buf))
+        (cl-incf killed)))
     (setq ecloud-notify--stack nil)
     (when (called-interactively-p 'interactive)
-      (message "Dismissed %d ecloud notification(s)" count))))
+      (message "Dismissed %d ecloud notification(s)" killed))))
+
+(defun ecloud-notify-unload-function ()
+  "Called by `unload-feature' before this feature is torn down.
+Without this hook, sticky notifications outlive their bookkeeping
+and become undismissable until the freshly-loaded
+`ecloud-notify-dismiss-all' cleans them up by buffer-name sweep."
+  (ignore-errors (ecloud-notify-dismiss-all))
+  nil)
 
 ;;;###autoload
 (defun ecloud-notify-show-log ()
