@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 ;; Hooking into ecloud-ws events if available
 (defvar ecloud-sql-event-hook nil)
@@ -214,10 +215,24 @@
          (pop-to-buffer buffer)))
      (lambda (err) (message "Failed to fetch info: %s" err)))))
 
-(defun ecloud-sql-help ()
-  "Show help for ecloud-sql-mode."
-  (interactive)
-  (message "SQL Keys: [d]DBs [u]Users [b]Backups [i]Info [+d]NewDB [Dd]DelDB [+u]NewUser [Du]DelUser [p]Proxy [r]Refresh [?]Help [q]Quit"))
+(transient-define-prefix ecloud-sql-help ()
+  "Cloud SQL browser key bindings."
+  [:description "Cloud SQL"
+   :class transient-columns
+   ["Browse"
+    ("d"   "Show databases"      ecloud-sql-show-databases)
+    ("u"   "Show users"          ecloud-sql-show-users)
+    ("b"   "Show backups"        ecloud-sql-show-backups)
+    ("i"   "Connection info"     ecloud-sql-connection-info)]
+   ["Modify"
+    ("+ d" "New database"        ecloud-sql-create-database)
+    ("D d" "Delete database"     ecloud-sql-delete-database)
+    ("+ u" "New user"            ecloud-sql-create-user)
+    ("D u" "Delete user"         ecloud-sql-delete-user)]
+   ["Actions"
+    ("p"   "Toggle proxy"        ecloud-sql-toggle-proxy)
+    ("r"   "Refresh"             ecloud-sql-refresh)
+    ("q"   "Quit window"         quit-window)]])
 
 (defvar ecloud-sql-mode-map nil "Keymap for `ecloud-sql-mode'.")
 

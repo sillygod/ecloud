@@ -13,6 +13,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 
 ;;; Customization
@@ -179,10 +180,18 @@
             (ecloud-ips-refresh))
         (error (message "Reserve failed: %s" (error-message-string err)))))))
 
-(defun ecloud-ips-help ()
-  "Show help for ecloud-ips-mode."
-  (interactive)
-  (message "IP Keys: [r]Refresh [+]Reserve [c]CopyIP [w]CopyName [?]Help [q]Quit | Type: EXTERNAL/INTERNAL | Status: Ephemeral/RESERVED/IN_USE"))
+(transient-define-prefix ecloud-ips-help ()
+  "Static IPs browser key bindings."
+  [:description "Static IPs (Type: EXTERNAL/INTERNAL — Status: Ephemeral/RESERVED/IN_USE)"
+   :class transient-columns
+   ["Actions"
+    ("r"   "Refresh"             ecloud-ips-refresh)
+    ("+"   "Reserve new IP"      ecloud-ips-reserve)]
+   ["Copy"
+    ("c"   "Copy IP"             ecloud-ips-copy-address)
+    ("w"   "Copy name"           ecloud-ips-copy-name)]
+   ["Window"
+    ("q"   "Quit window"         quit-window)]])
 
 ;;; Mode definition
 

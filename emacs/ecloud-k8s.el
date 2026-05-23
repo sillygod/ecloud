@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -1575,15 +1576,59 @@ Similar to kubectl api-resources output."
            (annotation (format " %s (%s) %s" full-api scope kind)))
       annotation)))
 
-(defun ecloud-k8s-help ()
-  "Show help for ecloud-k8s-mode."
-  (interactive)
-  (message "K8s: [RET]Action [p]Pods [s]Services [i]Ingresses [d]Deploys [h]Helm [n]Namespaces [K]Kind [N]Filter [=]SetLimit [T]ToggleLimit [y]YAML [l]Logs [L]Stream [S]Scale [e]Exec [A]Apply [M]Metrics [r]Refresh [Q]Disconnect [?]Help"))
+(transient-define-prefix ecloud-k8s-help ()
+  "Kubernetes browser key bindings."
+  [:description "Kubernetes"
+   :class transient-columns
+   ["Resources"
+    ("p"   "Pods"                ecloud-k8s-switch-to-pods)
+    ("s"   "Services"            ecloud-k8s-switch-to-services)
+    ("i"   "Ingresses"           ecloud-k8s-switch-to-ingresses)
+    ("d"   "Deployments"         ecloud-k8s-switch-to-deployments)
+    ("n"   "Namespaces"          ecloud-k8s-switch-to-namespaces)
+    ("h"   "Helm releases"       ecloud-k8s-helm-list)
+    ("K"   "View kind"           ecloud-k8s-view-kind)]
+   ["Filter"
+    ("N"   "Select namespace"    ecloud-k8s-select-namespace)
+    ("="   "Set pod limit"       ecloud-k8s-set-pod-limit)
+    ("T"   "Toggle pod limit"    ecloud-k8s-toggle-pod-limit)]
+   ["At Point"
+    ("RET" "Action"              ecloud-k8s-enter)
+    ("y"   "View YAML"           ecloud-k8s-view-yaml)
+    ("l"   "View logs"           ecloud-k8s-view-logs)
+    ("L"   "Stream logs"         ecloud-k8s-stream-logs)
+    ("S"   "Scale deployment"    ecloud-k8s-scale-deployment)
+    ("e"   "Pod exec"            ecloud-k8s-pod-exec)
+    ("E"   "Pod exec (vterm)"    ecloud-k8s-pod-exec-vterm)]
+   ["Cluster"
+    ("A"   "Apply manifest"      ecloud-k8s-apply-manifest)
+    ("M"   "Show metrics"        ecloud-k8s-show-metrics)
+    ("r"   "Refresh"             ecloud-k8s-refresh)
+    ("Q"   "Disconnect"          ecloud-k8s-disconnect)
+    ("q"   "Quit window"         quit-window)]])
 
-(defun ecloud-k8s-helm-help ()
-  "Show help for ecloud-helm-list-mode."
-  (interactive)
-  (message "Helm: [RET]Describe [i]Install [u]Upgrade [r]Rollback [h]History [d]Uninstall [g]Refresh [N]Filter [p]Pods [s]Services [n]Namespaces [Q]Disconnect [?]Help"))
+(transient-define-prefix ecloud-k8s-helm-help ()
+  "Helm releases key bindings."
+  [:description "Helm Releases"
+   :class transient-columns
+   ["Inspect"
+    ("RET" "Describe"            ecloud-k8s-helm-describe)
+    ("h"   "History"             ecloud-k8s-helm-history)
+    ("y"   "View YAML"           ecloud-k8s-view-yaml)]
+   ["Modify"
+    ("i"   "Install chart"       ecloud-k8s-helm-install)
+    ("u"   "Upgrade release"     ecloud-k8s-helm-upgrade)
+    ("r"   "Rollback"            ecloud-k8s-helm-rollback)
+    ("d"   "Uninstall"           ecloud-k8s-helm-uninstall)]
+   ["Navigate"
+    ("p"   "Pods"                ecloud-k8s-switch-to-pods)
+    ("s"   "Services"            ecloud-k8s-switch-to-services)
+    ("n"   "Namespaces"          ecloud-k8s-switch-to-namespaces)
+    ("N"   "Select namespace"    ecloud-k8s-select-namespace)]
+   ["General"
+    ("g"   "Refresh"             ecloud-k8s-refresh)
+    ("Q"   "Disconnect"          ecloud-k8s-disconnect)
+    ("q"   "Quit window"         quit-window)]])
 
 ;;; Mode definitions
 
@@ -1696,10 +1741,15 @@ Similar to kubectl api-resources output."
   (when (fboundp 'evil-motion-state)
     (evil-motion-state)))
 
-(defun ecloud-k8s-helm-history-help ()
-  "Show help for helm history mode."
-  (interactive)
-  (message "Helm History: [r]Rollback [g]Refresh [?]Help [q]Quit"))
+(transient-define-prefix ecloud-k8s-helm-history-help ()
+  "Helm history key bindings."
+  [:description "Helm History"
+   :class transient-columns
+   ["Actions"
+    ("r"   "Rollback to revision" ecloud-k8s-helm-history-rollback)
+    ("g"   "Refresh"              ecloud-k8s-helm-history-refresh)]
+   ["Window"
+    ("q"   "Quit window"          quit-window)]])
 
 (defun ecloud-k8s-helm-history-rollback ()
   "Rollback to the revision at point."

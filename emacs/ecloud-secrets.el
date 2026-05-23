@@ -23,6 +23,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -137,33 +138,20 @@ PROMPT is the prompt string."
     map)
   "Keymap for `ecloud-secrets-mode'.")
 
-(defun ecloud-secrets-help ()
-  "Show key bindings for the Secret Manager browser."
-  (interactive)
-  (let ((help-text "\
-Secret Manager Browser - Key Bindings
-=====================================
-
-Navigation:
-  RET, a    Access secret at point (read latest version)
-  g         Refresh list
-
-Modify:
-  +         Create a new secret
-  v         Add a new version to the secret at point
-  D         Delete the secret at point
-
-General:
-  ?         Show this help
-  q         Quit window
-
-Notes:
-- Payload input for create / add-version uses `read-passwd' —
-  hidden in the minibuffer, not stored in history.
-- Accessed payloads open in a read-only buffer, never the echo area.
-- Run `M-x ecloud-secrets-access' to read a specific version.
-"))
-    (message "%s" help-text)))
+(transient-define-prefix ecloud-secrets-help ()
+  "Secret Manager browser key bindings."
+  [:description "Secret Manager"
+   :class transient-columns
+   ["Browse"
+    ("RET" "Access at point"     ecloud-secrets-access-at-point)
+    ("a"   "Access at point"     ecloud-secrets-access-at-point)
+    ("g"   "Refresh list"        ecloud-secrets-refresh)]
+   ["Modify"
+    ("+"   "Create secret"       ecloud-secrets-create)
+    ("v"   "Add new version"     ecloud-secrets-add-version-at-point)
+    ("D"   "Delete secret"       ecloud-secrets-delete-at-point)]
+   ["Window"
+    ("q"   "Quit window"         quit-window)]])
 
 (defun ecloud-secrets--display (secrets)
   "Render SECRETS into the *ECloud Secrets* buffer."

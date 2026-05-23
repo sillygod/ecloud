@@ -12,6 +12,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -173,10 +174,26 @@
              (ecloud-browser-refresh))
            (lambda (err) (ecloud-notify (format "Move failed: %s" err) 5))))))))
 
-(defun ecloud-browser-help ()
-  "Show help for ecloud-browser-mode."
-  (interactive)
-  (message "GCS Keys: [RET]Enter [^]Up [r]Refresh [d]Download [u]Upload [D]Delete [+]Mkdir [c]CopyPath [C]CopyObj [R]MoveObj [l]Link [?]Help [q]Quit"))
+(transient-define-prefix ecloud-browser-help ()
+  "GCS browser key bindings."
+  [:description "Google Cloud Storage"
+   :class transient-columns
+   ["Navigate"
+    ("RET" "Enter"               ecloud-browser-enter)
+    ("^"   "Up"                  ecloud-browser-up)
+    ("r"   "Refresh"             ecloud-browser-refresh)]
+   ["Transfer"
+    ("d"   "Download"            ecloud-browser-download)
+    ("u"   "Upload"              ecloud-browser-upload)
+    ("D"   "Delete"              ecloud-browser-delete)
+    ("+"   "Mkdir"               ecloud-browser-create-folder)
+    ("R"   "Move object"         ecloud-browser-move-object)]
+   ["Copy / Link"
+    ("c"   "Copy path"           ecloud-browser-copy-path)
+    ("C"   "Copy object"         ecloud-browser-copy-object)
+    ("l"   "Presigned URL"       ecloud-browser-generate-presigned-url)]
+   ["Window"
+    ("q"   "Quit window"         quit-window)]])
 
 (defvar ecloud-browser-mode-map nil
   "Keymap for `ecloud-browser-mode'.")

@@ -26,6 +26,7 @@
 
 (require 'json)
 (require 'cl-lib)
+(require 'transient)
 
 ;; Forward declaration for backward compatibility
 (defvar ecloud-server-url)
@@ -1941,6 +1942,20 @@ maintaining a useful debugging window without memory issues."
 
 ;;; Account Status Buffer
 
+(transient-define-prefix ecloud-account-list-help ()
+  "ECloud accounts buffer key bindings."
+  [:description "ECloud Accounts"
+   :class transient-columns
+   ["At Point"
+    ("RET" "Switch to account"     ecloud-account-list-switch)
+    ("c"   "Connect"               ecloud-account-list-connect)
+    ("d"   "Disconnect"            ecloud-account-list-disconnect)
+    ("r"   "Restart"               ecloud-account-list-restart)
+    ("l"   "Show process log"      ecloud-account-list-show-log)]
+   ["General"
+    ("g"   "Refresh buffer"        ecloud-account-list-refresh)
+    ("q"   "Quit window"           quit-window)]])
+
 (defvar ecloud-account-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'ecloud-account-list-switch)
@@ -1949,6 +1964,7 @@ maintaining a useful debugging window without memory issues."
     (define-key map (kbd "r") #'ecloud-account-list-restart)
     (define-key map (kbd "l") #'ecloud-account-list-show-log)
     (define-key map (kbd "g") #'ecloud-account-list-refresh)
+    (define-key map (kbd "?") #'ecloud-account-list-help)
     (define-key map (kbd "q") #'quit-window)
     map)
   "Keymap for `ecloud-account-list-mode'.")
@@ -1984,6 +2000,7 @@ Commands:
     (kbd "r")   #'ecloud-account-list-restart
     (kbd "l")   #'ecloud-account-list-show-log
     (kbd "g")   #'ecloud-account-list-refresh
+    (kbd "?")   #'ecloud-account-list-help
     (kbd "q")   #'quit-window))
 
 (defun ecloud-account-list--get-account-at-point ()

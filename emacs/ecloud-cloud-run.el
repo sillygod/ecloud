@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -116,28 +117,73 @@ Without Asset API, it falls back to parallel queries (10-30 seconds)."
    services))
 
 (defun ecloud-cloud-run--fetch-services ()
-  "Fetch Cloud Run services for current region or all regions."
-  (let* ((show-all (and (null ecloud-cloud-run--current-region)
-                       ecloud-cloud-run-show-all-regions))
+  "Fetch Cloud Run services for current region or all regions.
+For the all-regions path, dispatches `cloud_run_list_all_services'
+which fans out per-region ListServices calls concurrently on the
+server (one RPC round-trip, latency bounded by the slowest region).
+
+The all-regions mode is signalled by `ecloud-cloud-run--current-region'
+being nil — this matches what `ecloud-cloud-run-toggle-all-regions'
+sets and what the mode-line displays. The
+`ecloud-cloud-run-show-all-regions' defcustom only seeds the INITIAL
+state at load time."
+  (let* ((show-all (null ecloud-cloud-run--current-region))
          (region (or ecloud-cloud-run--current-region
-                    ecloud-cloud-run-default-region))
-         (params (if show-all
-                    (list :all_regions t)
-                  (list :region region))))
-    (when show-all
-      (ecloud-notify-info "Fetching services from all regions..."))
+                    ecloud-cloud-run-default-region)))
     (condition-case err
-        (let* ((response (ecloud-rpc-request "cloud_run_list_services" params))
-               (services (plist-get response :services)))
-          (when show-all
-            (ecloud-notify-info (format "Found %d services across all regions" (length services))))
-          (ecloud-cloud-run--parse-services services))
+        (cond
+         (show-all
+          (ecloud-notify-info "Fetching services from all regions...")
+          (let* ((response (ecloud-rpc-request "cloud_run_list_all_services"))
+                 (services (plist-get response :services))
+                 (count (or (plist-get response :count) 0))
+                 (scanned (or (plist-get response :locationsScanned) 0))
+                 (errors (plist-get response :errors)))
+            ;; Surface per-region errors without aborting the scan.
+            (when errors
+              (let ((err-list nil))
+                (while errors
+                  (push (format "%s: %s"
+                                (substring (symbol-name (car errors)) 1)
+                                (cadr errors))
+                        err-list)
+                  (setq errors (cddr errors)))
+                (when err-list
+                  (message "Cloud Run: %d region(s) failed: %s"
+                           (length err-list)
+                           (mapconcat #'identity (nreverse err-list) "; ")))))
+            (ecloud-notify-info
+             (format "Found %d service(s) across %d region(s)" count scanned))
+            (ecloud-cloud-run--parse-services services)))
+         (t
+          (let* ((response (ecloud-rpc-request "cloud_run_list_services"
+                                              (list :region region)))
+                 (services (plist-get response :services)))
+            (ecloud-cloud-run--parse-services services))))
       (error
        (ecloud-notify-error (format "Failed to fetch Cloud Run services: %s"
                                    (error-message-string err)))
        nil))))
 
 ;;; Browser mode
+
+(transient-define-prefix ecloud-cloud-run-help ()
+  "Cloud Run browser key bindings."
+  [:description "Cloud Run"
+   :class transient-columns
+   ["Navigation"
+    ("RET" "View service details"  ecloud-cloud-run-view-service)
+    ("o"   "Open URL in browser"   ecloud-cloud-run-open-url)
+    ("l"   "View logs"             ecloud-cloud-run-view-logs)]
+   ["Region"
+    ("r"   "Change region"         ecloud-cloud-run-change-region)
+    ("A"   "Toggle all regions"    ecloud-cloud-run-toggle-all-regions)]
+   ["Actions"
+    ("d"   "Deploy service"        ecloud-cloud-run-deploy)
+    ("D"   "Delete service"        ecloud-cloud-run-delete-service)]
+   ["General"
+    ("g"   "Refresh"               ecloud-cloud-run-refresh)
+    ("q"   "Quit window"           quit-window)]])
 
 (defvar ecloud-cloud-run-mode-map
   (let ((map (make-sparse-keymap)))
@@ -149,6 +195,7 @@ Without Asset API, it falls back to parallel queries (10-30 seconds)."
     (define-key map (kbd "D") #'ecloud-cloud-run-delete-service)
     (define-key map (kbd "A") #'ecloud-cloud-run-toggle-all-regions)
     (define-key map (kbd "o") #'ecloud-cloud-run-open-url)
+    (define-key map (kbd "?") #'ecloud-cloud-run-help)
     (define-key map (kbd "q") #'quit-window)
     ;; Evil mode support
     (when (fboundp 'evil-define-key*)
@@ -161,6 +208,7 @@ Without Asset API, it falls back to parallel queries (10-30 seconds)."
         (kbd "D") #'ecloud-cloud-run-delete-service
         (kbd "A") #'ecloud-cloud-run-toggle-all-regions
         (kbd "o") #'ecloud-cloud-run-open-url
+        (kbd "?") #'ecloud-cloud-run-help
         (kbd "q") #'quit-window))
     map)
   "Keymap for `ecloud-cloud-run-mode'.")
@@ -198,8 +246,15 @@ Without Asset API, it falls back to parallel queries (10-30 seconds)."
 (defun ecloud-cloud-run-list (&optional region)
   "List Cloud Run services in REGION."
   (interactive)
-  (when region
+  (cond
+   (region
     (setq ecloud-cloud-run--current-region region))
+   ;; First-time entry: seed `current-region' from the defcustom so the
+   ;; initial view matches user preference. Once set, `A' / change-region
+   ;; toggles freely (nil = all regions, non-nil = that region).
+   ((and (null ecloud-cloud-run--current-region)
+         (not ecloud-cloud-run-show-all-regions))
+    (setq ecloud-cloud-run--current-region ecloud-cloud-run-default-region)))
   (let ((buffer (get-buffer-create "*ECloud-CloudRun*")))
     (with-current-buffer buffer
       (ecloud-cloud-run-mode)

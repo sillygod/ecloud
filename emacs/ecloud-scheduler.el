@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -242,46 +243,30 @@ returns a merged result; this replaces the older N-round-trip loop."
   (tabulated-list-print)
   (ecloud-notify-info "Cloud Scheduler jobs refreshed"))
 
-(defun ecloud-scheduler-help ()
-  "Show help for Cloud Scheduler browser."
-  (interactive)
-  (let ((help-text "
-Cloud Scheduler Browser - Key Bindings
-======================================
-
-Navigation:
-  RET     View job details
-  L       Filter to specific location
-  A       Show all locations
-
-Actions:
-  c       Create new HTTP job
-  p       Pause job
-  P       Resume job
-  R       Run job now (manual trigger)
-  D       Delete job
-
-General:
-  r, g    Refresh job list
-  ?       Show this help
-  q       Quit window
-
-Current Mode: %s
-
-Tips:
-- By default, jobs from all locations are shown
-- Press 'L' to filter to a specific location
-- Press 'A' to show all locations again
-- Jobs are location-specific (e.g., us-central1, asia-east1)
-- Press 'c' to create a new scheduled job
-- Use Cron expressions for scheduling (e.g., '0 9 * * *' = daily at 9am)
-"))
-    (message help-text 
-             (if ecloud-scheduler--show-all-locations
-                 "All Locations"
-               (format "Location: %s" 
-                      (or ecloud-scheduler--current-location 
-                          ecloud-scheduler-default-location))))))
+(transient-define-prefix ecloud-scheduler-help ()
+  "Cloud Scheduler browser key bindings."
+  [:description
+   (lambda ()
+     (if ecloud-scheduler--show-all-locations
+         "Cloud Scheduler — All locations"
+       (format "Cloud Scheduler — %s"
+               (or ecloud-scheduler--current-location
+                   ecloud-scheduler-default-location))))
+   :class transient-columns
+   ["Navigation"
+    ("RET" "View job details"        ecloud-scheduler-view-job)
+    ("L"   "Filter to location"      ecloud-scheduler-change-location)
+    ("A"   "Show all locations"      ecloud-scheduler-show-all-locations)]
+   ["Actions"
+    ("c"   "Create new HTTP job"     ecloud-scheduler-create-http-job)
+    ("p"   "Pause job"               ecloud-scheduler-pause-job)
+    ("P"   "Resume job"              ecloud-scheduler-resume-job)
+    ("R"   "Run job now"             ecloud-scheduler-run-job)
+    ("D"   "Delete job"              ecloud-scheduler-delete-job)]
+   ["General"
+    ("r"   "Refresh"                 ecloud-scheduler-refresh)
+    ("g"   "Refresh"                 ecloud-scheduler-refresh)
+    ("q"   "Quit window"             quit-window)]])
 
 (defun ecloud-scheduler-change-location ()
   "Change the current Cloud Scheduler location."

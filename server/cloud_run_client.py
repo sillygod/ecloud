@@ -14,6 +14,7 @@ import logging
 from google.cloud import run_v2
 from google.cloud import logging_v2
 from google.cloud import asset_v1
+from google.cloud.location import locations_pb2
 from google.api_core.extended_operation import ExtendedOperation
 
 from config import config
@@ -93,6 +94,7 @@ class CloudRunClient:
         self._revisions_client = run_v2.RevisionsClient()
         self._logging_client = None  # Lazy initialization
         self._asset_client = None  # Lazy initialization
+        self._locations_cache: Optional[List[str]] = None
     
     def _get_logging_client(self) -> logging_v2.Client:
         """Get or create logging client."""
@@ -106,15 +108,70 @@ class CloudRunClient:
             self._asset_client = asset_v1.AssetServiceClient()
         return self._asset_client
     
+    def list_project_locations(self, force_refresh: bool = False) -> List[str]:
+        """List Cloud Run regions worth scanning for this project.
+
+        Strategy (first that yields results wins):
+
+        1. Cloud Asset Inventory `SearchAllResources' for
+           run.googleapis.com/Service — returns ONLY regions that
+           actually host at least one service. This is the fastest path
+           because subsequent ListServices fan-out only touches regions
+           with real data. Note: Asset Inventory has a few-minute
+           ingestion delay, so brand-new services may briefly be
+           invisible.
+
+        2. Cloud Run `ListLocations' API — returns regions where the
+           project has Cloud Run enabled. Used when Asset Inventory is
+           unavailable; less precise than Asset but still narrows the
+           hardcoded set.
+
+        3. Hardcoded `list_regions()' — the comprehensive ~38 region
+           list. Last resort when both APIs fail.
+
+        Result is cached on the instance until `force_refresh=True'.
+        """
+        if self._locations_cache is not None and not force_refresh:
+            return self._locations_cache
+
+        # 1. Asset Inventory: regions with actual services.
+        try:
+            asset_client = self._get_asset_client()
+            request = asset_v1.SearchAllResourcesRequest(
+                scope=f"projects/{self._project}",
+                asset_types=["run.googleapis.com/Service"],
+            )
+            response = asset_client.search_all_resources(request=request)
+            regions = sorted({r.location for r in response if r.location})
+            if regions:
+                self._locations_cache = regions
+                return regions
+        except Exception as e:
+            logger.debug(f"Cloud Run Asset Inventory failed: {e}")
+
+        # 2. Cloud Run ListLocations: enabled regions.
+        try:
+            request = locations_pb2.ListLocationsRequest(
+                name=f"projects/{self._project}"
+            )
+            response = self._services_client.list_locations(request=request)
+            locations = sorted({loc.location_id for loc in response if loc.location_id})
+            if locations:
+                self._locations_cache = locations
+                return locations
+        except Exception as e:
+            logger.debug(f"Cloud Run ListLocations failed: {e}")
+
+        # 3. Hardcoded fallback.
+        self._locations_cache = self.list_regions()
+        return self._locations_cache
+
     def list_regions(self) -> List[str]:
-        """List available Cloud Run regions.
-        
-        Returns:
-            List of region names sorted alphabetically.
-            
-        Note:
-            This returns a comprehensive list of known Cloud Run regions.
-            The actual availability may vary by project and quotas.
+        """List the comprehensive set of known Cloud Run regions.
+
+        Static fallback used when ListLocations API is unavailable.
+        Prefer `list_project_locations' which returns only regions
+        actually enabled for this project.
         """
         # Comprehensive list of Cloud Run regions as of 2024
         # Based on: https://cloud.google.com/run/docs/locations

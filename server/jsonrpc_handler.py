@@ -176,6 +176,7 @@ class JsonRpcHandler:
             # Cloud Run methods
             "cloud_run_list_regions": self._cloud_run_list_regions,
             "cloud_run_list_services": self._cloud_run_list_services,
+            "cloud_run_list_all_services": self._cloud_run_list_all_services,
             "cloud_run_get_service": self._cloud_run_get_service,
             "cloud_run_list_revisions": self._cloud_run_list_revisions,
             "cloud_run_delete_service": self._cloud_run_delete_service,
@@ -1555,7 +1556,7 @@ class JsonRpcHandler:
         """List Cloud Run services in a region or all regions."""
         region = params.get("region", "us-central1")
         all_regions = params.get("all_regions", False)
-        
+
         try:
             client = self._get_cloud_run_client()
             services = client.list_services(region=region, all_regions=all_regions)
@@ -1565,6 +1566,52 @@ class JsonRpcHandler:
             }
         except Exception as e:
             raise RuntimeError(f"CloudRunError: Failed to list services: {e}")
+
+    async def _cloud_run_list_all_services(self, params: dict) -> dict:
+        """List Cloud Run services across all valid project regions in parallel.
+
+        Regions are discovered via the Cloud Run ListLocations API
+        (cached). Per-region ListServices calls are fanned out
+        concurrently with ``asyncio.gather`` so total latency is
+        bounded by the slowest region rather than the sum of all.
+
+        Per-region failures are isolated under ``errors`` instead of
+        aborting the whole scan.
+        """
+        try:
+            client = self._get_cloud_run_client()
+            locations = await asyncio.to_thread(client.list_project_locations)
+
+            async def fetch(loc: str):
+                try:
+                    services = await asyncio.to_thread(
+                        client.list_services, loc, False
+                    )
+                    return loc, services, None
+                except Exception as e:
+                    return loc, [], str(e)
+
+            results = await asyncio.gather(*(fetch(loc) for loc in locations))
+
+            all_services: list[dict] = []
+            errors: dict[str, str] = {}
+            for loc, services, err in results:
+                if err is not None:
+                    errors[loc] = err
+                    continue
+                for s in services:
+                    all_services.append(s.to_dict())
+
+            return {
+                "services": all_services,
+                "count": len(all_services),
+                "locationsScanned": len(locations),
+                "errors": errors,
+            }
+        except Exception as e:
+            raise RuntimeError(
+                f"CloudRunError: Failed to list services across regions: {e}"
+            )
 
     def _cloud_run_get_service(self, params: dict) -> dict:
         """Get details of a specific Cloud Run service."""

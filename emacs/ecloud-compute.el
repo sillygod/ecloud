@@ -13,6 +13,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 (require 'ecloud-notify)
 
@@ -258,10 +259,25 @@ If nil, checks the server configuration or defaults to user identity."
          (ecloud-compute-refresh))
        (lambda (err) (ecloud-notify (format "Failed to delete: %s" err) 5))))))
 
-(defun ecloud-compute-help ()
-  "Show help."
-  (interactive)
-  (message "Keys: [RET/s]SSH [S]Start [T]Stop [!]Reset [D]Delete [r]Refresh [c]CopyInternalIP [C]CopyExternalIP [w]CopyName [?]Help [q]Quit"))
+(transient-define-prefix ecloud-compute-help ()
+  "Compute Engine browser key bindings."
+  [:description "Compute Engine"
+   :class transient-columns
+   ["Connect"
+    ("RET" "SSH"                 ecloud-compute-ssh)
+    ("s"   "SSH"                 ecloud-compute-ssh)]
+   ["Power"
+    ("S"   "Start instance"      ecloud-compute-start-instance)
+    ("T"   "Stop instance"       ecloud-compute-stop-instance)
+    ("!"   "Reset instance"      ecloud-compute-reset-instance)
+    ("D"   "Delete instance"     ecloud-compute-delete-instance)]
+   ["Copy"
+    ("c"   "Copy internal IP"    ecloud-compute-copy-internal-ip)
+    ("C"   "Copy external IP"    ecloud-compute-copy-external-ip)
+    ("w"   "Copy name"           ecloud-compute-copy-name)]
+   ["General"
+    ("r"   "Refresh"             ecloud-compute-refresh)
+    ("q"   "Quit window"         quit-window)]])
 
 ;;; Mode definition
 

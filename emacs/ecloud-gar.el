@@ -13,6 +13,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'transient)
 (require 'ecloud-rpc)
 
 ;; Hooking into ecloud-ws events if available
@@ -319,10 +320,21 @@ Returns t if confirmed."
 
 ;;; Mode definition
 
-(defun ecloud-gar-help ()
-  "Show help for ecloud-gar-mode."
-  (interactive)
-  (message "GAR Keys: [RET]Enter [^]Up [r]Refresh [P]Pull [D]Delete [t]Tag [?]Help [q]Quit"))
+(transient-define-prefix ecloud-gar-help ()
+  "Artifact Registry browser key bindings."
+  [:description "Artifact Registry"
+   :class transient-columns
+   ["Navigation"
+    ("RET" "Enter"               ecloud-gar-enter)
+    ("^"   "Up"                  ecloud-gar-up)
+    ("r"   "Refresh"             ecloud-gar-refresh)]
+   ["Image actions"
+    ("P"   "Pull"                ecloud-gar-pull)
+    ("D"   "Delete"              ecloud-gar-delete)
+    ("t"   "Tag"                 ecloud-gar-tag)
+    ("+"   "Tag"                 ecloud-gar-tag)]
+   ["Window"
+    ("q"   "Quit window"         quit-window)]])
 
 (defvar ecloud-gar-mode-map nil
   "Keymap for `ecloud-gar-mode'.")
