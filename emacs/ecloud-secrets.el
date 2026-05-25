@@ -101,17 +101,9 @@ PROMPT is the prompt string."
 
 ;;; List buffer
 
-(define-derived-mode ecloud-secrets-mode tabulated-list-mode "ECloud-Secrets"
-  "Major mode for browsing GCP Secret Manager secrets."
-  (setq tabulated-list-format
-        [("Name" 40 t)
-         ("Replication" 14 t)
-         ("Created" 26 t)
-         ("Labels" 30 nil)])
-  (setq tabulated-list-padding 1)
-  (setq tabulated-list-sort-key (cons "Name" nil))
-  (tabulated-list-init-header))
-
+;; Keymap MUST be declared before `define-derived-mode' below, otherwise
+;; the macro auto-creates an empty keymap, binds the symbol, and our
+;; `defvar' becomes a no-op (defvar only sets unbound variables).
 (defvar ecloud-secrets-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
@@ -137,6 +129,17 @@ PROMPT is the prompt string."
         (kbd "q") #'quit-window))
     map)
   "Keymap for `ecloud-secrets-mode'.")
+
+(define-derived-mode ecloud-secrets-mode tabulated-list-mode "ECloud-Secrets"
+  "Major mode for browsing GCP Secret Manager secrets."
+  (setq tabulated-list-format
+        [("Name" 40 t)
+         ("Replication" 14 t)
+         ("Created" 26 t)
+         ("Labels" 30 nil)])
+  (setq tabulated-list-padding 1)
+  (setq tabulated-list-sort-key (cons "Name" nil))
+  (tabulated-list-init-header))
 
 (transient-define-prefix ecloud-secrets-help ()
   "Secret Manager browser key bindings."
