@@ -361,11 +361,14 @@ class K8sClient:
         
         clusters = []
         for c in response.clusters:
-            # Prefer DNS endpoint over IP
+            # Prefer DNS endpoint over IP, but only if it allows external
+            # traffic. A DNS endpoint with allow_external_traffic=False is only
+            # reachable from inside the cluster VPC; hitting it from outside
+            # gets a 403 HTML page from the Google Front End.
             dns_endpoint = None
             try:
                 dns_config = c.control_plane_endpoints_config.dns_endpoint_config
-                if dns_config.endpoint:
+                if dns_config.endpoint and dns_config.allow_external_traffic:
                     dns_endpoint = dns_config.endpoint
             except (AttributeError, Exception):
                 pass
@@ -387,11 +390,16 @@ class K8sClient:
         name = f"projects/{self._project}/locations/{location}/clusters/{cluster_name}"
         cluster = self._gke_client.get_cluster(name=name)
         
-        # Prefer DNS endpoint over IP to avoid firewall/VPN issues
+        # Prefer DNS endpoint over IP to avoid firewall/VPN issues, but only if
+        # it allows external traffic. When allow_external_traffic is False the
+        # DNS endpoint is reachable only from inside the cluster VPC, and
+        # requests from outside are rejected with a 403 by the Google Front End
+        # (before ever reaching the kube-apiserver). In that case fall back to
+        # the IP endpoint, which is what gcloud/kubectl/k9s use by default.
         dns_endpoint = None
         try:
             dns_config = cluster.control_plane_endpoints_config.dns_endpoint_config
-            if dns_config.endpoint:
+            if dns_config.endpoint and dns_config.allow_external_traffic:
                 dns_endpoint = dns_config.endpoint
         except (AttributeError, Exception):
             pass
