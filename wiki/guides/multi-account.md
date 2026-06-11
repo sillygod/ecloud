@@ -1,3 +1,13 @@
+---
+type: guide
+audience: end-user
+related_components: [account-manager]
+moved_from: MULTI_ACCOUNT_GUIDE.md
+---
+
+> 📖 **使用指南。** 架構與不變式請看 [[account-manager]] / [[multi-account-process-model]]；
+> 設計緣由見 [[002-process-per-account]]。本頁是 end-user 操作指南。
+
 # ECloud Multi-Account Support - 完整指南
 
 本指南詳細說明 ECloud 的多帳號支援功能，包含設定、使用方式、遷移指南和進階用法。

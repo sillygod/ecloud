@@ -1,3 +1,15 @@
+---
+type: report
+status: point-in-time
+exempt_from_sync: true
+related_components: [service-usage]
+moved_from: SERVICE_USAGE_IMPLEMENTATION.md
+---
+
+> 🕒 **Point-in-time report — exempt from the sync protocol.** This captures the
+> service-usage feature as it was implemented; do not "freshen" it to match
+> current code. For the live picture see [[service-usage]].
+
 # Service Usage Implementation Summary
 
 ## Overview

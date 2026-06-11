@@ -1,3 +1,12 @@
+---
+type: guide
+audience: end-user
+related_components: [service-usage]
+moved_from: SERVICE_USAGE_QUICKSTART.md
+---
+
+> 📖 **Quickstart.** 架構細節見 [[service-usage]]。
+
 # Service Usage Quick Start
 
 ## Installation

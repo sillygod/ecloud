@@ -1,3 +1,13 @@
+---
+type: guide
+audience: end-user
+related_components: [account-manager, kubernetes, helm]
+moved_from: SERVICE_ACCOUNT_SETUP.md
+---
+
+> 📖 **設定指南。** 如何建立 GCP service account、授權 IAM 角色與 Helm 所需權限。
+> 這是 ECloud 唯一一份完整的 setup 文件 —— 上手前先讀這頁。
+
 # ECloud Service Account 設定指南
 
 本文件詳細說明如何為 ECloud 建立和設定 Google Cloud Service Account，包含所有必要的權限和 Helm 特定設定。

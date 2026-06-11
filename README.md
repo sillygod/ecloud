@@ -164,7 +164,9 @@ ECloud 會記住最後使用的帳號，並在下次啟動時自動連線：
 
 ### 詳細文件
 
-更多配置範例、遷移指南和進階用法，請參考 [MULTI_ACCOUNT_GUIDE.md](MULTI_ACCOUNT_GUIDE.md)。
+更多配置範例、遷移指南和進階用法，請參考 [wiki/guides/multi-account.md](wiki/guides/multi-account.md)。
+
+專案的完整文件（架構、各服務說明、設定指南）整理在 [`wiki/`](wiki/index.md)。
 
 ## 快速開始
 

@@ -1,3 +1,15 @@
+---
+type: report
+status: point-in-time
+exempt_from_sync: true
+related_components: [ui-conventions]
+moved_from: TRANSIENT_MENU_VERIFICATION.md
+---
+
+> 🕒 **Point-in-time report — exempt from the sync protocol.** Verification record
+> for the transient-menu work (task 14.1). For the live picture see
+> [[ui-conventions]] / [[005-transient-menus]].
+
 # Transient Menu Command Mapping Verification
 
 ## Task 14.1: 確保所有 transient 選項呼叫現有的 ecloud-* 指令
