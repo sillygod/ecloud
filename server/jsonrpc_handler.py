@@ -1012,7 +1012,7 @@ class JsonRpcHandler:
         limit = params.get("limit", 0)  # Add limit parameter
         
         client = self._get_k8s_client()
-        pods = client.list_pods(namespace, label_selector, limit, field_selector)
+        pods = client.list_pods(namespace, label_selector, limit, field_selector, include_metrics=True)
         return {
             "pods": [p.to_dict() for p in pods],
             "count": len(pods),

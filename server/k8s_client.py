@@ -74,7 +74,9 @@ class PodInfo:
     ready: str
     restarts: int
     age: str
-    
+    cpu: str = ""
+    memory: str = ""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -87,6 +89,8 @@ class PodInfo:
             "ready": self.ready,
             "restarts": self.restarts,
             "age": self.age,
+            "cpu": self.cpu or "",
+            "memory": self.memory or "",
         }
 
 
@@ -241,6 +245,17 @@ def _parse_quantity(quantity: str | int | float) -> float:
     except ValueError:
         return 0.0
 
+
+def _format_cpu(cores: float) -> str:
+    """Format CPU cores as millicores for display (e.g. 0.123 -> '123m')."""
+    return f"{round(cores * 1000)}m"
+
+
+def _format_memory(bytes_val: float) -> str:
+    """Format memory bytes as Mi for display (e.g. 134217728 -> '128Mi')."""
+    return f"{round(bytes_val / 1024**2)}Mi"
+
+
 def auto_refresh_token(method):
     """Decorator to refresh token on 401 and retry once."""
     @wraps(method)
@@ -351,6 +366,11 @@ class K8sClient:
     def autoscaling_api(self) -> k8s.AutoscalingV2Api:
         self._ensure_connected()
         return k8s.AutoscalingV2Api(self._api_client)
+
+    @property
+    def custom_objects_api(self) -> k8s.CustomObjectsApi:
+        self._ensure_connected()
+        return k8s.CustomObjectsApi(self._api_client)
     
     # --- Cluster Operations ---
     
@@ -758,16 +778,50 @@ class K8sClient:
         if not pod.status.container_statuses:
             return 0
         return sum(cs.restart_count for cs in pod.status.container_statuses)
+
+    def _get_pod_metrics(self, namespace: str = "") -> dict[tuple[str, str], tuple[str, str]]:
+        """Fetch current CPU/memory usage from metrics-server (metrics.k8s.io).
+
+        Returns a map of (namespace, name) -> (cpu_display, memory_display).
+        Returns an empty map if metrics-server is unavailable so the pod list
+        still renders without usage columns.
+        """
+        try:
+            if namespace:
+                data = self.custom_objects_api.list_namespaced_custom_object(
+                    "metrics.k8s.io", "v1beta1", namespace, "pods"
+                )
+            else:
+                data = self.custom_objects_api.list_cluster_custom_object(
+                    "metrics.k8s.io", "v1beta1", "pods"
+                )
+        except Exception:
+            # metrics-server not installed / no permission / transient error
+            return {}
+
+        metrics: dict[tuple[str, str], tuple[str, str]] = {}
+        for item in data.get("items", []):
+            meta = item.get("metadata", {})
+            key = (meta.get("namespace", ""), meta.get("name", ""))
+            cpu_cores = 0.0
+            mem_bytes = 0.0
+            for c in item.get("containers", []):
+                usage = c.get("usage", {})
+                cpu_cores += _parse_quantity(usage.get("cpu", "0"))
+                mem_bytes += _parse_quantity(usage.get("memory", "0"))
+            metrics[key] = (_format_cpu(cpu_cores), _format_memory(mem_bytes))
+        return metrics
     
     @auto_refresh_token
-    def list_pods(self, namespace: str = "", label_selector: str = "", limit: int = 0, field_selector: str = "") -> list[PodInfo]:
+    def list_pods(self, namespace: str = "", label_selector: str = "", limit: int = 0, field_selector: str = "", include_metrics: bool = False) -> list[PodInfo]:
         """List pods. Empty namespace = all namespaces.
-        
+
         Args:
             namespace: Namespace filter (empty = all namespaces)
             label_selector: Label selector filter
             limit: Maximum number of pods to return (0 = no limit)
             field_selector: Field selector filter (e.g., "status.phase=Running")
+            include_metrics: Also fetch CPU/memory usage from metrics-server
         """
         kwargs = {
             # Request only essential fields to reduce payload size
@@ -784,10 +838,14 @@ class K8sClient:
             items = self.core_api.list_namespaced_pod(namespace, **kwargs).items
         else:
             items = self.core_api.list_pod_for_all_namespaces(**kwargs).items
-        
+
+        # Current CPU/memory usage from metrics-server (empty if unavailable)
+        metrics = self._get_pod_metrics(namespace) if include_metrics else {}
+
         # Pre-allocate list for better performance
         result = []
         for p in items:
+            cpu, memory = metrics.get((p.metadata.namespace, p.metadata.name), ("", ""))
             result.append(PodInfo(
                 name=p.metadata.name,
                 namespace=p.metadata.namespace,
@@ -799,8 +857,10 @@ class K8sClient:
                 ready=self._pod_ready_count(p),
                 restarts=self._pod_restarts(p),
                 age=_format_age(p.metadata.creation_timestamp),
+                cpu=cpu,
+                memory=memory,
             ))
-        
+
         return result
     
     @auto_refresh_token
