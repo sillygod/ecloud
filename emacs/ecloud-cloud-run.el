@@ -197,19 +197,6 @@ state at load time."
     (define-key map (kbd "o") #'ecloud-cloud-run-open-url)
     (define-key map (kbd "?") #'ecloud-cloud-run-help)
     (define-key map (kbd "q") #'quit-window)
-    ;; Evil mode support
-    (when (fboundp 'evil-define-key*)
-      (evil-define-key* 'motion map
-        (kbd "RET") #'ecloud-cloud-run-view-service
-        (kbd "r") #'ecloud-cloud-run-change-region
-        (kbd "g") #'ecloud-cloud-run-refresh
-        (kbd "l") #'ecloud-cloud-run-view-logs
-        (kbd "d") #'ecloud-cloud-run-deploy
-        (kbd "D") #'ecloud-cloud-run-delete-service
-        (kbd "A") #'ecloud-cloud-run-toggle-all-regions
-        (kbd "o") #'ecloud-cloud-run-open-url
-        (kbd "?") #'ecloud-cloud-run-help
-        (kbd "q") #'quit-window))
     map)
   "Keymap for `ecloud-cloud-run-mode'.")
 
@@ -229,6 +216,23 @@ state at load time."
   (setq tabulated-list-sort-key (cons "Name" nil))
   (add-hook 'tabulated-list-revert-hook #'ecloud-cloud-run--refresh nil t)
   (tabulated-list-init-header))
+
+;; Evil mode support: install in `with-eval-after-load' so bindings apply
+;; regardless of evil/ecloud load order (the keymap-defvar form only ran once
+;; at load and no-opped when evil wasn't loaded yet).
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-cloud-run-mode 'motion)
+  (evil-define-key* 'motion ecloud-cloud-run-mode-map
+    (kbd "RET") #'ecloud-cloud-run-view-service
+    (kbd "r") #'ecloud-cloud-run-change-region
+    (kbd "g") #'ecloud-cloud-run-refresh
+    (kbd "l") #'ecloud-cloud-run-view-logs
+    (kbd "d") #'ecloud-cloud-run-deploy
+    (kbd "D") #'ecloud-cloud-run-delete-service
+    (kbd "A") #'ecloud-cloud-run-toggle-all-regions
+    (kbd "o") #'ecloud-cloud-run-open-url
+    (kbd "?") #'ecloud-cloud-run-help
+    (kbd "q") #'quit-window))
 
 (defun ecloud-cloud-run--refresh ()
   "Refresh the Cloud Run services list."

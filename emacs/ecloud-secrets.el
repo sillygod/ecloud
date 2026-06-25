@@ -115,18 +115,6 @@ PROMPT is the prompt string."
     (define-key map (kbd "D") #'ecloud-secrets-delete-at-point)
     (define-key map (kbd "?") #'ecloud-secrets-help)
     (define-key map (kbd "q") #'quit-window)
-    ;; Evil mode support: bind in motion state so they work in
-    ;; tabulated-list-mode-derived buffers under evil-mode.
-    (when (fboundp 'evil-define-key*)
-      (evil-define-key* 'motion map
-        (kbd "g") #'ecloud-secrets-refresh
-        (kbd "RET") #'ecloud-secrets-access-at-point
-        (kbd "a") #'ecloud-secrets-access-at-point
-        (kbd "v") #'ecloud-secrets-add-version-at-point
-        (kbd "+") #'ecloud-secrets-create
-        (kbd "D") #'ecloud-secrets-delete-at-point
-        (kbd "?") #'ecloud-secrets-help
-        (kbd "q") #'quit-window))
     map)
   "Keymap for `ecloud-secrets-mode'.")
 
@@ -140,6 +128,22 @@ PROMPT is the prompt string."
   (setq tabulated-list-padding 1)
   (setq tabulated-list-sort-key (cons "Name" nil))
   (tabulated-list-init-header))
+
+;; Evil mode support: install in `with-eval-after-load' so the bindings are
+;; applied regardless of whether evil loads before or after ecloud. Binding
+;; inside the keymap defvar only runs once at load time and silently no-ops
+;; when evil isn't loaded yet (the cause of "keys only work after reload").
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-secrets-mode 'motion)
+  (evil-define-key* 'motion ecloud-secrets-mode-map
+    (kbd "g") #'ecloud-secrets-refresh
+    (kbd "RET") #'ecloud-secrets-access-at-point
+    (kbd "a") #'ecloud-secrets-access-at-point
+    (kbd "v") #'ecloud-secrets-add-version-at-point
+    (kbd "+") #'ecloud-secrets-create
+    (kbd "D") #'ecloud-secrets-delete-at-point
+    (kbd "?") #'ecloud-secrets-help
+    (kbd "q") #'quit-window))
 
 (transient-define-prefix ecloud-secrets-help ()
   "Secret Manager browser key bindings."

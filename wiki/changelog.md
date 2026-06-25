@@ -3,6 +3,16 @@
 Append-only log of changes to **the wiki** (not the code — code history lives in
 git). Newest first. One entry per sync/edit session.
 
+## 2026-06-25
+
+- **Documented the evil-binding load-order convention.** `ecloud-secrets`,
+  `ecloud-cloud-run`, and `ecloud-scheduler` were installing evil motion-state
+  keys inside the keymap `defvar` behind `(fboundp 'evil-define-key*)`, which
+  no-ops when ecloud loads before evil — keys only worked after `reload-ecloud`.
+  Moved them to `with-eval-after-load 'evil` + `evil-set-initial-state` to match
+  the other 7 modes. Added the convention to [[conventions]] and a gotcha to
+  [[secrets]].
+
 ## 2026-06-11
 
 - **Moved existing top-level docs into the wiki** (`git mv`, history preserved):

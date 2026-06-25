@@ -47,6 +47,9 @@ Elisp: `ecloud-secrets-list`, `ecloud-secrets-access[-at-point]`,
   `name@version`, size, and timestamp.
 - ⚠️ **`ecloud-secrets-mode-map` is defined before `define-derived-mode`** — the
   ordering bug that shadowed it was fixed in commit `c0f2f10`.
+- ⚠️ **Evil keys are installed in `with-eval-after-load 'evil`**, not inside the
+  keymap `defvar`. The old `(fboundp 'evil-define-key*)` form no-opped when ecloud
+  loaded before evil, so keys worked only after `reload-ecloud`.
 - ⚠️ **`GRPC_DNS_RESOLVER=native` set in `secret_manager_client.py`.** See
   [[004-grpc-native-dns-resolver]].
 - Delete is permanent (no soft delete).

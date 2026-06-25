@@ -55,6 +55,14 @@ Every domain view follows the same shape (see [[ui-conventions]]):
 `define-derived-mode`, or the macro's auto-created empty keymap shadows it
 (this bit `ecloud-secrets` — commit `c0f2f10`).
 
+⚠️ **Evil bindings via `with-eval-after-load 'evil`:** install motion-state keys
+in a `(with-eval-after-load 'evil ...)` block *after* `define-derived-mode`, and
+call `(evil-set-initial-state 'ecloud-<domain>-mode 'motion)` there too. Do **not**
+bury `evil-define-key*` inside the keymap `defvar` behind `(fboundp 'evil-define-key*)`
+— that runs once at load and silently no-ops if ecloud loads before evil, so the
+keys only start working after a manual `reload-ecloud`. Fixed for
+`ecloud-secrets`/`-cloud-run`/`-scheduler` to match the other 7 modes.
+
 ## Server Client Pattern
 
 - One module per service: `server/<domain>_client.py`, exposing a class and a

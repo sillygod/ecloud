@@ -173,21 +173,6 @@ returns a merged result; this replaces the older N-round-trip loop."
     (define-key map (kbd "A") #'ecloud-scheduler-show-all-locations)
     (define-key map (kbd "?") #'ecloud-scheduler-help)
     (define-key map (kbd "q") #'quit-window)
-    ;; Evil mode support
-    (when (fboundp 'evil-define-key*)
-      (evil-define-key* 'motion map
-        (kbd "RET") #'ecloud-scheduler-view-job
-        (kbd "r") #'ecloud-scheduler-refresh
-        (kbd "g") #'ecloud-scheduler-refresh
-        (kbd "c") #'ecloud-scheduler-create-http-job
-        (kbd "p") #'ecloud-scheduler-pause-job
-        (kbd "P") #'ecloud-scheduler-resume-job
-        (kbd "R") #'ecloud-scheduler-run-job
-        (kbd "D") #'ecloud-scheduler-delete-job
-        (kbd "L") #'ecloud-scheduler-change-location
-        (kbd "A") #'ecloud-scheduler-show-all-locations
-        (kbd "?") #'ecloud-scheduler-help
-        (kbd "q") #'quit-window))
     map)
   "Keymap for `ecloud-scheduler-mode'.")
 
@@ -207,6 +192,25 @@ returns a merged result; this replaces the older N-round-trip loop."
   (setq tabulated-list-sort-key (cons "Name" nil))
   (add-hook 'tabulated-list-revert-hook #'ecloud-scheduler--refresh nil t)
   (tabulated-list-init-header))
+
+;; Evil mode support: install in `with-eval-after-load' so bindings apply
+;; regardless of evil/ecloud load order (the keymap-defvar form only ran once
+;; at load and no-opped when evil wasn't loaded yet).
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'ecloud-scheduler-mode 'motion)
+  (evil-define-key* 'motion ecloud-scheduler-mode-map
+    (kbd "RET") #'ecloud-scheduler-view-job
+    (kbd "r") #'ecloud-scheduler-refresh
+    (kbd "g") #'ecloud-scheduler-refresh
+    (kbd "c") #'ecloud-scheduler-create-http-job
+    (kbd "p") #'ecloud-scheduler-pause-job
+    (kbd "P") #'ecloud-scheduler-resume-job
+    (kbd "R") #'ecloud-scheduler-run-job
+    (kbd "D") #'ecloud-scheduler-delete-job
+    (kbd "L") #'ecloud-scheduler-change-location
+    (kbd "A") #'ecloud-scheduler-show-all-locations
+    (kbd "?") #'ecloud-scheduler-help
+    (kbd "q") #'quit-window))
 
 (defun ecloud-scheduler--refresh ()
   "Refresh the Cloud Scheduler jobs list."
