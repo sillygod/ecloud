@@ -799,22 +799,29 @@ Fire-and-forget; no UI block on every window resize."
 
 ;;; Helm Operations
 
-(defun ecloud-rpc-helm-list-releases (&optional namespace all-namespaces)
-  "List Helm releases. NAMESPACE for filtering, ALL-NAMESPACES to list all."
+(defun ecloud-rpc-helm-list-releases (&optional namespace all-namespaces include-all)
+  "List Helm releases. NAMESPACE for filtering, ALL-NAMESPACES to list all.
+INCLUDE-ALL defaults to t on the server (`helm list -a'); pass the symbol
+`off' to list only deployed releases."
   (let ((params nil))
     (when namespace (setq params (plist-put params :namespace namespace)))
     (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
+    (when (eq include-all 'off)
+      (setq params (plist-put params :include_all :json-false)))
     (ecloud-rpc-request "helm_list_releases" params)))
 
-(defun ecloud-rpc-helm-list-releases-async (callback &optional namespace all-namespaces fetch-details error-callback)
+(defun ecloud-rpc-helm-list-releases-async (callback &optional namespace all-namespaces fetch-details error-callback include-all)
   "List Helm releases asynchronously.
 FETCH-DETAILS controls whether to fetch detailed info (chart, version, status).
-Set to nil for faster listing with basic info only."
+Set to nil for faster listing with basic info only.
+INCLUDE-ALL mirrors `helm list -a' and defaults to t; pass nil explicitly to
+list only deployed releases."
   (let ((params nil))
     (when namespace (setq params (plist-put params :namespace namespace)))
     (when all-namespaces (setq params (plist-put params :all_namespaces all-namespaces)))
     (when (not (eq fetch-details 'unspecified))
       (setq params (plist-put params :fetch_details (if fetch-details t :json-false))))
+    (setq params (plist-put params :include_all (if include-all t :json-false)))
     (ecloud-rpc-request-async "helm_list_releases" callback params error-callback)))
 
 (defun ecloud-rpc-helm-get-release-details (name &optional namespace)

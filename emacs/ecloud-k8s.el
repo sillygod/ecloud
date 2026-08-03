@@ -40,6 +40,15 @@ You can toggle this with `ecloud-k8s-helm-toggle-details'."
   :type 'boolean
   :group 'ecloud-k8s)
 
+(defcustom ecloud-k8s-helm-include-all t
+  "Whether to list Helm releases in every state, like `helm list -a'.
+When t, failed, pending, uninstalling, superseded and uninstalled
+releases are listed alongside deployed ones — needed to roll back a
+release whose latest revision failed.
+When nil, only `deployed' releases are listed."
+  :type 'boolean
+  :group 'ecloud-k8s)
+
 (defface ecloud-k8s-name-face
   '((t :inherit font-lock-function-name-face :weight bold))
   "Face for resource names."
@@ -137,6 +146,13 @@ Parses structured error messages and displays them appropriately."
    ((string= status "Waiting") (propertize status 'face 'ecloud-k8s-pending-face))
    ((member status '("Error" "Failed" "CrashLoopBackOff" "ImagePullBackOff"))
     (propertize status 'face 'ecloud-k8s-error-face))
+   ;; Helm release statuses are lowercase (see ReleaseRevisionStatus).
+   ((string= status "deployed") (propertize status 'face 'ecloud-k8s-running-face))
+   ((member status '("failed" "unknown"))
+    (propertize status 'face 'ecloud-k8s-error-face))
+   ((member status '("pending-install" "pending-upgrade" "pending-rollback"
+                     "uninstalling" "uninstalled" "superseded"))
+    (propertize status 'face 'ecloud-k8s-pending-face))
    (t status)))
 
 (defun ecloud-k8s--format-age (creation-time)
@@ -457,7 +473,8 @@ Uses the current namespace filter if set, otherwise fetches from all namespaces.
            ;; Cancel progress timer on error
            (when progress-timer
              (cancel-timer progress-timer))
-           (ecloud-k8s--display-error err "Failed to fetch Helm releases"))))
+           (ecloud-k8s--display-error err "Failed to fetch Helm releases"))
+         ecloud-k8s-helm-include-all))  ; `helm list -a' by default
     (switch-to-buffer buffer))))
 
 (defun ecloud-k8s--helm-release-to-entry (release)

@@ -295,33 +295,46 @@ class HelmClient:
         self,
         namespace: str | None = None,
         all_namespaces: bool = False,
-        fetch_details: bool = True
+        fetch_details: bool = True,
+        include_all: bool = True,
+        max_releases: int = 0
     ) -> list[dict[str, Any]]:
         """List Helm releases.
-        
+
         Args:
             namespace: Target namespace (optional)
             all_namespaces: List releases from all namespaces
             fetch_details: Whether to fetch detailed info (chart, version, status).
                           Set to False for faster listing with basic info only.
-        
+            include_all: Equivalent to `helm list -a` — include releases in any
+                         state (failed, pending, uninstalling, superseded,
+                         uninstalled), not just `deployed`. Defaults to True so
+                         a failed release stays visible for rollback.
+            max_releases: `helm list --max`; 0 means no limit. pyhelm3 defaults
+                          this to 256, which silently truncates alphabetically
+                          and can hide the very failed release you need.
+
         Returns:
             List of release dicts with keys: name, namespace, chart, version, status
             If fetch_details=False, only name and namespace are guaranteed.
         """
         self._ensure_initialized()
-        
+
         try:
             import asyncio
             import time
-            
+
             start_time = time.time()
-            
+
             # List releases using pyhelm3
             # pyhelm3's list_releases returns a generator of Release objects (name + namespace only)
+            # `all=True` maps to `helm list --all`, which overrides the state
+            # filter entirely (helm's List.SetStateMask short-circuits on All).
             releases_generator = await self._client.list_releases(
                 namespace=namespace,
-                all_namespaces=all_namespaces
+                all_namespaces=all_namespaces,
+                all=include_all,
+                max_releases=max_releases
             )
             
             # Convert generator to list

@@ -1338,9 +1338,17 @@ class JsonRpcHandler:
         namespace = params.get("namespace")
         all_namespaces = params.get("all_namespaces", False)
         fetch_details = params.get("fetch_details", True)  # Default to True for backward compatibility
-        
+        # Default to `helm list -a` semantics so failed/pending releases stay
+        # visible — you need them listed to roll back to a good revision.
+        include_all = params.get("include_all", True)
+        # 0 = no limit. Truncating (pyhelm3 defaults to 256) drops releases
+        # alphabetically without saying so, which can hide a failed release.
+        max_releases = params.get("max_releases", 0)
+
         client = self._get_helm_client()
-        releases = await client.list_releases(namespace, all_namespaces, fetch_details)
+        releases = await client.list_releases(
+            namespace, all_namespaces, fetch_details, include_all, max_releases
+        )
         return {
             "releases": releases,
             "count": len(releases),
