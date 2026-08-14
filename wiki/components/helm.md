@@ -19,7 +19,7 @@ depends_on: [rpc-bridge, jsonrpc-dispatcher, kubernetes]
 depended_by: []
 spec_refs:
   - .kiro/specs/helm-and-transient-ui/design.md
-last_verified: 2026-06-11
+last_verified: 2026-08-14
 ---
 
 # Helm
@@ -40,8 +40,8 @@ elisp UI lives inside `ecloud-k8s.el`; the server logic is `helm_client.py`.
 
 | Method | Returns / effect |
 |--------|------------------|
-| `initialize()` | Async; writes a temp kubeconfig from cluster endpoint + CA + token |
-| `list_releases(namespace, all_namespaces, fetch_details)` | Releases; `fetch_details=True` fetches revision + chart metadata concurrently |
+| `initialize()` | Async; writes a temp kubeconfig from cluster endpoint + token, plus the CA when there is one |
+| `list_releases(namespace, all_namespaces, fetch_details, include_all=True, max_releases=0)` | Releases; `fetch_details=True` fetches revision + chart metadata concurrently. `include_all` = `helm list -a`, `max_releases=0` = no `--max` cap |
 | `get_release_details(name, namespace)` | chart, version, status, values, revision history, notes |
 | `install_chart(release, chart_ref, namespace, values, version, create_namespace, wait, timeout)` | Install |
 | `upgrade_release(...)`, `rollback_release(name, revision, namespace, wait)`, `uninstall_release(name, namespace, wait)` | Lifecycle |
@@ -58,7 +58,14 @@ slow `fetch_details` mode). Transient help: `ecloud-k8s-helm-help`,
 ## Key Invariants
 
 - ⚠️ **`initialize()` runs before any release op** — it materializes the temp
-  kubeconfig (endpoint, CA path, token) from the K8s connection.
+  kubeconfig (endpoint, CA path, token) from the K8s connection. It is called
+  once, from `_k8s_connect`; if it is skipped, every `helm_*` call fails with
+  `helm_not_initialized_error` while all K8s views keep working.
+- ⚠️ **The CA path is optional.** On DNS-endpoint clusters
+  `get_cluster_credentials()` yields `ca_cert_path=None`; `initialize()` must
+  still proceed and simply omit `certificate-authority` from the kubeconfig, so
+  Helm verifies against the system root store. Requiring a CA here is what broke
+  Helm listing on public-DNS clusters. See [[007-gke-endpoint-ca-trust]].
 - ⚠️ **pyhelm3 for releases, `helm` CLI for repos.** There is no CLI fallback for
   release operations.
 - ⚠️ **Detail-fetch concurrency is bounded** by `HELM_CONCURRENT_REQUESTS`
@@ -71,7 +78,7 @@ slow `fetch_details` mode). Transient help: `ecloud-k8s-helm-help`,
 ## Interactions
 
 - Depends on [[kubernetes]] for cluster credentials; there is no direct K8s↔Helm
-  method call — Helm just reads endpoint/CA/token.
+  method call — Helm just reads endpoint/CA-or-`None`/token.
 - Routes through [[jsonrpc-dispatcher]] (`helm_*`, error code `-32006`).
 - No WebSocket events; operations are request/response (with `wait`/`timeout`).
 
@@ -79,6 +86,11 @@ slow `fetch_details` mode). Transient help: `ecloud-k8s-helm-help`,
 
 - Listing many releases with `fetch_details=t` is slow (per-release metadata
   calls); leave it off for big clusters and toggle on demand.
+- Releases are listed in **every** state by default (`helm list -a`, commit
+  `cb2486b`) so a release whose latest revision failed stays visible for
+  rollback; `ecloud-k8s-helm-include-all` turns that off. `max_releases=0`
+  overrides pyhelm3's `--max 256`, which truncated alphabetically without
+  saying so.
 - pyhelm3 can be version-sensitive against the cluster's Helm/Tiller-less setup;
   errors surface with permission/accessibility hints.
 - Repo operations shell out — the `helm` binary must be on PATH.
@@ -86,5 +98,6 @@ slow `fetch_details` mode). Transient help: `ecloud-k8s-helm-help`,
 ## See Also
 
 - [[kubernetes]] — provides the cluster connection
+- [[007-gke-endpoint-ca-trust]] — why the CA path may be `None`
 - [[helm-and-transient-ui]] — distilled spec
 - [[jsonrpc-dispatcher]]

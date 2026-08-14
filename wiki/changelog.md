@@ -3,6 +3,20 @@
 Append-only log of changes to **the wiki** (not the code — code history lives in
 git). Newest first. One entry per sync/edit session.
 
+## 2026-08-14
+
+- **Documented the GKE endpoint / TLS trust-anchor rule.** Helm listing failed on
+  clusters reached via the DNS endpoint: no cluster CA is written on that path,
+  but `get_cluster_credentials()` required `ca_cert_path` to be truthy, so it
+  returned `None` and the Helm client was never initialized. Made the CA path
+  optional in `k8s_client.get_cluster_credentials()` and
+  `helm_client.initialize()` (kubeconfig omits `certificate-authority` → system
+  root store). New ADR [[007-gke-endpoint-ca-trust]], registered in [[index]];
+  invariants added to [[kubernetes]] and [[helm]].
+- **Caught up on `cb2486b`** (never synced): [[helm]]'s `list_releases` signature
+  now shows `include_all` / `max_releases`, with a gotcha covering the
+  `helm list -a` default and the lifted `--max 256` cap.
+
 ## 2026-06-25
 
 - **Documented the evil-binding load-order convention.** `ecloud-secrets`,

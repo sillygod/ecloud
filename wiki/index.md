@@ -59,6 +59,7 @@ SDKs and pushes async updates back over a WebSocket.
 | [[004-grpc-native-dns-resolver]] | Force `GRPC_DNS_RESOLVER=native` before imports | accepted |
 | [[005-transient-menus]] | Transient popups for help & menus | accepted |
 | [[006-health-check-before-restart]] | Probe `/health` before auto-restarting on timeout | accepted |
+| [[007-gke-endpoint-ca-trust]] | GKE endpoint choice determines the TLS trust anchor | accepted |
 
 ## 🔄 Flows
 

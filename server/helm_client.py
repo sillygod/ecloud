@@ -162,7 +162,10 @@ class HelmClient:
         
         Args:
             cluster_endpoint: Kubernetes API server endpoint (e.g., https://1.2.3.4)
-            ca_cert_path: Path to CA certificate file
+            ca_cert_path: Path to CA certificate file. None when the endpoint is
+                          served by a public CA (the GKE DNS endpoint), in which
+                          case the kubeconfig omits `certificate-authority` and
+                          Helm uses the system CA bundle.
             token: Bearer token for authentication
         """
         self.cluster_endpoint = cluster_endpoint
@@ -190,8 +193,10 @@ class HelmClient:
         # Ensure Service Account environment variable is set
         sa_path = _get_sa_path()
         
-        # Verify we have cluster connection info
-        if not self.cluster_endpoint or not self.ca_cert_path or not self.token:
+        # Verify we have cluster connection info. ca_cert_path is optional: the
+        # GKE DNS endpoint presents a Google public cert, so there is no cluster
+        # CA to write into the kubeconfig.
+        if not self.cluster_endpoint or not self.token:
             raise ValueError(
                 "Cluster connection info not provided. "
                 "Please connect to a Kubernetes cluster first."
@@ -204,15 +209,16 @@ class HelmClient:
         # Create temporary kubeconfig with cluster credentials
         # This avoids conflicts with local gcloud kubeconfig
         try:
+            cluster_entry = {"server": self.cluster_endpoint}
+            if self.ca_cert_path:
+                cluster_entry["certificate-authority"] = self.ca_cert_path
+
             kubeconfig_content = {
                 "apiVersion": "v1",
                 "kind": "Config",
                 "clusters": [{
                     "name": "ecloud-cluster",
-                    "cluster": {
-                        "server": self.cluster_endpoint,
-                        "certificate-authority": self.ca_cert_path,
-                    }
+                    "cluster": cluster_entry,
                 }],
                 "users": [{
                     "name": "ecloud-user",
@@ -998,14 +1004,15 @@ def get_helm_client() -> HelmClient:
 
 async def initialize_helm_client(
     cluster_endpoint: str,
-    ca_cert_path: str,
+    ca_cert_path: str | None,
     token: str
 ) -> HelmClient:
     """Initialize and return the Helm client with cluster credentials.
-    
+
     Args:
         cluster_endpoint: Kubernetes API server endpoint
-        ca_cert_path: Path to CA certificate file
+        ca_cert_path: Path to CA certificate file, or None to use the system CA
+            bundle (GKE DNS endpoint)
         token: Bearer token for authentication
     
     Returns:

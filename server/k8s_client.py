@@ -467,14 +467,17 @@ class K8sClient:
         self._api_resources_cache = None
         self._api_resources_cache_time = None
     
-    def get_cluster_credentials(self) -> dict[str, str] | None:
+    def get_cluster_credentials(self) -> dict[str, str | None] | None:
         """Get current cluster credentials for Helm client.
         
         Returns:
             Dict with keys: endpoint, ca_cert_path, token
+            ca_cert_path is None when connected through the DNS endpoint, which
+            is served by a Google public CA — there is no cluster CA to pin, so
+            Helm must fall back to the system CA bundle.
             None if not connected
         """
-        if not self._config or not self._ca_cert_path or not self._credentials:
+        if not self._config or not self._credentials:
             return None
         
         # Ensure token is fresh

@@ -32,7 +32,7 @@ rpc_methods:
   - k8s_apply_manifest
 depends_on: [rpc-bridge, jsonrpc-dispatcher]
 depended_by: [helm]
-last_verified: 2026-06-11
+last_verified: 2026-08-14
 ---
 
 # Kubernetes (GKE)
@@ -90,6 +90,13 @@ Actions: `ecloud-k8s-connect-cluster`, `ecloud-k8s-view-yaml`,
   true; otherwise fall back to the IP endpoint + self-signed CA. Picking the DNS
   endpoint without external traffic yields a 403 HTML page from the Google Front
   End on private clusters (commit `3b8e885`).
+- ⚠️ **The endpoint choice picks the TLS trust anchor, and a missing CA is
+  normal.** The IP endpoint needs the cluster's self-signed CA written to a temp
+  file; the DNS endpoint is served by a Google public CA, so no CA file is
+  written and `_config.ssl_ca_cert` stays unset (system root store). Hence
+  `get_cluster_credentials()` returns `ca_cert_path=None` on DNS-endpoint
+  clusters — that is a connected state, **not** a failure. Never treat a falsy
+  CA path as "not connected". See [[007-gke-endpoint-ca-trust]].
 - ⚠️ **Metrics are best-effort.** `_get_pod_metrics` returns `{}` if metrics-server
   is missing or RBAC denies it; the pod list still renders with `-` in CPU/Memory.
   Only fetched when `include_metrics=True` (the pods view passes it; the log
@@ -104,7 +111,8 @@ Actions: `ecloud-k8s-connect-cluster`, `ecloud-k8s-view-yaml`,
 - Exec output → `broadcast({type:"k8s_exec_output",...})` → `ecloud-k8s-exec-hook`
   → vterm render; session close → `k8s_exec_session_stopped` →
   `ecloud-k8s-event-hook`. Full path in [[k8s-pod-exec-vterm]].
-- Provides cluster credentials (endpoint, CA, token) to [[helm]].
+- Provides cluster credentials (endpoint, CA *or `None`*, token) to [[helm]] via
+  `get_cluster_credentials()`, called once from `_k8s_connect`.
 
 ## Gotchas
 
@@ -121,4 +129,4 @@ Actions: `ecloud-k8s-connect-cluster`, `ecloud-k8s-view-yaml`,
 
 - [[helm]] — releases on the connected cluster
 - [[token-refresh]], [[websocket-events]], [[k8s-pod-exec-vterm]]
-- [[004-grpc-native-dns-resolver]]
+- [[004-grpc-native-dns-resolver]], [[007-gke-endpoint-ca-trust]]
